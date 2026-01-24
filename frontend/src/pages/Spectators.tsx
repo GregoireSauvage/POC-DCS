@@ -3,6 +3,7 @@ import { useAuth } from "../state/auth";
 import type { HallOut, SpectatorOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { createSpectator, listHalls, searchSpectator } from "../api/cinema";
+import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Spectators() {
   const auth = useAuth();
@@ -65,61 +66,62 @@ export default function Spectators() {
 
   return (
     <div className="container">
-      <div className="row">
-        <div className="col">
-          <div className="card">
-            <h1>Spectators</h1>
-            <div className="muted">name + age + external_id are encrypted. Search uses HMAC lookup without plaintext in DB.</div>
-            <div style={{ height: 10 }} />
-            <button className="btn" disabled={loading} onClick={refreshHalls}>Refresh halls</button>
-            {error ? <div className="error" style={{ marginTop: 8 }}>{error}</div> : null}
+      <div className="grid cols-2">
+        <Card
+          title="Spectators"
+          subtitle="Encrypted fields: name / age / ticket. Search uses HMAC lookup (exact match)."
+          right={<Pill>{auth.role}</Pill>}
+        >
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Button onClick={refreshHalls} disabled={loading}>Refresh halls</Button>
+            <span className="badge">
+              <span className="muted">Expected</span>
+              <strong>agent</strong> age decrypted, PII masked
+            </span>
+          </div>
 
-            <hr />
+          {error ? <div style={{ marginTop: 12 }}><Alert kind="error">{error}</Alert></div> : null}
 
-            <h2>Create spectator</h2>
+          <hr />
+
+          <h2>Create spectator</h2>
+          <div className="field">
+            <label>Hall</label>
+            <select value={hallId} onChange={(e) => setHallId(e.target.value)}>
+              <option value="" disabled>Select hall</option>
+              {halls.map((h) => <option key={h.id} value={h.id}>{h.name ?? "Hall"} ({h.id.slice(0, 8)}…)</option>)}
+            </select>
+          </div>
+          <div className="grid cols-2">
             <div className="field">
-              <label>Hall</label>
-              <select value={hallId} onChange={(e) => setHallId(e.target.value)}>
-                <option value="" disabled>Select hall</option>
-                {halls.map((h) => <option key={h.id} value={h.id}>{h.name ?? "Hall"} ({h.id.slice(0, 8)}…)</option>)}
-              </select>
-            </div>
-            <div className="row">
-              <div className="col">
-                <div className="field">
-                  <label>Name (PII)</label>
-                  <input value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-              </div>
-              <div className="col">
-                <div className="field">
-                  <label>Age (sensitive)</label>
-                  <input type="number" value={age} onChange={(e) => setAge(Number(e.target.value))} />
-                </div>
-              </div>
+              <label>Name (PII)</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="field">
-              <label>Ticket ID (PII, searchable via HMAC)</label>
-              <input value={externalId} onChange={(e) => setExternalId(e.target.value)} />
-            </div>
-            <button className="btn primary" disabled={loading || !hallId} onClick={onCreate}>Create</button>
-
-            <div style={{ marginTop: 10 }} className="muted">
-              Expected: admin sees all; agent sees age but masked name/ticket; developer sees masked values.
+              <label>Age (SENSITIVE)</label>
+              <input type="number" value={age} onChange={(e) => setAge(Number(e.target.value))} />
             </div>
           </div>
-        </div>
+          <div className="field">
+            <label>Ticket ID (PII, searchable)</label>
+            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <Button variant="primary" disabled={loading || !hallId} onClick={onCreate}>Create</Button>
+          </div>
+        </Card>
 
-        <div className="col">
-          <div className="card">
-            <h1>Search by ticket ID</h1>
-            <div className="field">
-              <label>Ticket ID (exact match)</label>
-              <input value={searchExternalId} onChange={(e) => setSearchExternalId(e.target.value)} />
-            </div>
-            <button className="btn primary" disabled={loading} onClick={onSearch}>Search</button>
+        <Card title="Search by ticket ID" subtitle="Exact match on HMAC(ticket). Plaintext ticket never stored in DB index.">
+          <div className="field">
+            <label>Ticket ID</label>
+            <input value={searchExternalId} onChange={(e) => setSearchExternalId(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <Button variant="primary" disabled={loading} onClick={onSearch}>Search</Button>
+          </div>
 
-            <table className="table" style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 12 }} className="tablewrap">
+            <table className="table">
               <thead>
                 <tr>
                   <th>ID</th>
@@ -130,20 +132,25 @@ export default function Spectators() {
                 </tr>
               </thead>
               <tbody>
+                {loading && !searchResults.length ? (
+                  <tr><td colSpan={5}><SkeletonRow /></td></tr>
+                ) : null}
                 {searchResults.map((s) => (
-                  <tr key={s.id}>
-                    <td className="muted">{s.id}</td>
-                    <td className="muted">{s.hall_id}</td>
+                  <tr key={String(s.id)}>
+                    <td className="mono muted">{String(s.id)}</td>
+                    <td className="mono muted">{s.hall_id}</td>
                     <td>{s.name ?? "—"}</td>
-                    <td>{s.age === null ? "—" : String(s.age)}</td>
+                    <td><Mono>{s.age === null ? "—" : String(s.age)}</Mono></td>
                     <td>{s.external_id ?? "—"}</td>
                   </tr>
                 ))}
-                {!searchResults.length ? <tr><td colSpan={5} className="muted">No results.</td></tr> : null}
+                {!loading && !searchResults.length ? (
+                  <tr><td colSpan={5} className="muted">No results.</td></tr>
+                ) : null}
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { useAuth } from "../state/auth";
 import type { AuditOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { listAudit } from "../api/cinema";
+import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Audit() {
   const auth = useAuth();
@@ -29,45 +30,64 @@ export default function Audit() {
 
   return (
     <div className="container">
-      <div className="card">
-        <h1>Audit</h1>
-        <div className="muted">Admin only. Shows decrypt/mask/deny per request.</div>
-        <div style={{ height: 10 }} />
-        <button className="btn" disabled={loading} onClick={refresh}>Refresh</button>
-        {error ? <div className="error" style={{ marginTop: 8 }}>{error}</div> : null}
+      <Card
+        title="Audit"
+        subtitle="Admin only. Shows enforcement results per request (decrypt/mask/deny)."
+        right={<Pill kind="ok">{auth.role}</Pill>}
+      >
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Button onClick={refresh} disabled={loading}>Refresh</Button>
+          <span className="badge">
+            <span className="muted">You should see</span>
+            <strong>fields_decrypted / fields_masked / fields_denied</strong>
+          </span>
+        </div>
 
-        <table className="table" style={{ marginTop: 10 }}>
-          <thead>
-            <tr>
-              <th>ts</th>
-              <th>request_id</th>
-              <th>subject</th>
-              <th>action</th>
-              <th>resource</th>
-              <th>outcome</th>
-              <th>fields</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((a, idx) => (
-              <tr key={a.request_id + idx}>
-                <td className="muted">{a.ts}</td>
-                <td className="muted">{a.request_id}</td>
-                <td className="muted">{a.subject_role}:{(a.subject_user_id ?? "").slice(0, 8)}…</td>
-                <td>{a.action}</td>
-                <td className="muted">{a.resource_type}:{(a.resource_id ?? "").slice(0, 8)}…</td>
-                <td>{a.outcome}</td>
-                <td className="muted">
-                  d:{a.fields_decrypted.join(",") || "—"}<br/>
-                  m:{a.fields_masked.join(",") || "—"}<br/>
-                  x:{a.fields_denied.join(",") || "—"}
-                </td>
+        {error ? <div style={{ marginTop: 12 }}><Alert kind="error">{error}</Alert></div> : null}
+
+        <div style={{ marginTop: 12 }} className="tablewrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ts</th>
+                <th>request_id</th>
+                <th>subject</th>
+                <th>action</th>
+                <th>resource</th>
+                <th>outcome</th>
+                <th>fields</th>
               </tr>
-            ))}
-            {!items.length ? <tr><td colSpan={7} className="muted">No audit events yet.</td></tr> : null}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {loading && !items.length ? (
+                <tr><td colSpan={7}><SkeletonRow /></td></tr>
+              ) : null}
+              {items.map((a, idx) => (
+                <tr key={a.request_id + idx}>
+                  <td className="muted">{a.ts}</td>
+                  <td className="mono muted">{a.request_id}</td>
+                  <td className="muted">{a.subject_role}:{(a.subject_user_id ?? "").slice(0, 8)}…</td>
+                  <td>{a.action}</td>
+                  <td className="muted">{a.resource_type}:{(a.resource_id ?? "").slice(0, 8)}…</td>
+                  <td>
+                    <Pill kind={a.outcome === "allow" ? "ok" : a.outcome === "deny" ? "danger" : "warn"}>
+                      {a.outcome}
+                    </Pill>
+                  </td>
+                  <td className="small muted">
+                    <div><Mono>d</Mono>: {a.fields_decrypted.join(", ") || "—"}</div>
+                    <div><Mono>m</Mono>: {a.fields_masked.join(", ") || "—"}</div>
+                    <div><Mono>x</Mono>: {a.fields_denied.join(", ") || "—"}</div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && !items.length ? (
+                <tr><td colSpan={7} className="muted">No audit events yet.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }

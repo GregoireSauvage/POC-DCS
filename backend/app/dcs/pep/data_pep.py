@@ -5,24 +5,30 @@ from app.dcs.pdp.types import Decision
 
 vault = VaultClient()
 
+
 def mask_string(s: str) -> str:
     s = "" if s is None else str(s)
     if len(s) <= 2:
         return "*" * len(s)
-    return s[0] + "***" + s[-1]
+    return s[0] + "***"
+
 
 def mask_uuid(s: str) -> str:
     s = "" if s is None else str(s)
     if len(s) <= 8:
         return "****"
-    return s[:4] + "…" + s[-4:]
+    return s[:4] + "…"
+
 
 def mask_age(age: Any) -> str:
     try:
         a = int(age)
     except Exception:
         return "***"
-    return f"{(a//10)*10}s"
+    if a < 18:
+        return "-18"
+    return "+18"
+
 
 @dataclass
 class ApplyResult:
@@ -31,14 +37,25 @@ class ApplyResult:
     masked: list[str]
     denied: list[str]
 
-def apply_decision(*, decision: Decision, ciphertext_row: dict[str, Any], field_to_ciphertext: dict[str, str]) -> ApplyResult:
+
+def apply_decision(
+    *,
+    decision: Decision,
+    ciphertext_row: dict[str, Any],
+    field_to_ciphertext: dict[str, str],
+) -> ApplyResult:
     out: dict[str, Any] = {}
     decrypted: list[str] = []
     masked: list[str] = []
     denied: list[str] = []
 
     if not decision.allow:
-        return ApplyResult(payload={}, decrypted=[], masked=[], denied=list(decision.field_actions.keys()))
+        return ApplyResult(
+            payload={},
+            decrypted=[],
+            masked=[],
+            denied=list(decision.field_actions.keys()),
+        )
 
     for field, action in decision.field_actions.items():
         if action == "deny":

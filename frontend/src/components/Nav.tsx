@@ -1,52 +1,50 @@
-import React from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../state/auth";
-
-const activeStyle: React.CSSProperties = { textDecoration: "underline" };
+import { Button, Pill } from "./ui";
 
 export default function Nav() {
   const auth = useAuth();
   const nav = useNavigate();
 
   return (
-    <div className="container">
-      <nav>
-        <Link to="/" style={{ fontWeight: 700 }}>Cinema DCS PoC</Link>
+    <header className="topbar">
+      <div className="topbar-inner">
+        <Link to="/" className="brand" aria-label="Home">
+          <span className="dot" />
+          <span>Cinema DCS PoC</span>
+        </Link>
 
-        <NavLink to="/films" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
-          Films
-        </NavLink>
-        <NavLink to="/halls" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
-          Halls
-        </NavLink>
-        <NavLink to="/spectators" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
-          Spectators
-        </NavLink>
-        <NavLink to="/audit" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
-          Audit
-        </NavLink>
+        <div className="navlinks">
+          <NavLink to="/films" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Films</NavLink>
+          <NavLink to="/halls" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Halls</NavLink>
+          <NavLink to="/spectators" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Spectators</NavLink>
+          <NavLink to="/audit" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Audit</NavLink>
+        </div>
 
-        <div style={{ marginLeft: "auto" }} />
+        <div className="spacer" />
 
         {auth.token ? (
           <>
             <span className="badge">
-              <span>user:</span> <strong>{auth.username}</strong> <span className="muted">({auth.role})</span>
+              <span className="muted">user</span>
+              <strong>{auth.username}</strong>
+              <Pill kind={auth.role === "admin" ? "ok" : auth.role === "agent" ? "warn" : undefined}>
+                {auth.role}
+              </Pill>
             </span>
-            <button
-              className="btn"
+            <Button
               onClick={() => {
                 auth.logout();
                 nav("/login");
               }}
             >
               Logout
-            </button>
+            </Button>
           </>
         ) : (
-          <button className="btn primary" onClick={() => nav("/login")}>Login</button>
+          <Button variant="primary" onClick={() => nav("/login")}>Login</Button>
         )}
-      </nav>
-    </div>
+      </div>
+    </header>
   );
 }

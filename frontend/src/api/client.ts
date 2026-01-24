@@ -17,11 +17,9 @@ export async function apiFetch<T>(
   const url = `${API_BASE}${path}`;
   const headers = new Headers(opts.headers || {});
   headers.set("Content-Type", "application/json");
-
   if (opts.token) headers.set("Authorization", `Bearer ${opts.token}`);
 
   const res = await fetch(url, { ...opts, headers });
-
   const text = await res.text();
   const body = text ? safeJson(text) : null;
 
@@ -30,9 +28,5 @@ export async function apiFetch<T>(
 }
 
 function safeJson(s: string) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
+  try { return JSON.parse(s); } catch { return s; }
 }

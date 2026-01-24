@@ -3,13 +3,14 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { login } from "../api/auth";
 import { ApiError } from "../api/client";
 import { useAuth } from "../state/auth";
+import { Alert, Button, Card, Pill } from "../components/ui";
 
-type Preset = { label: string; username: string; password: string; note: string };
+type Preset = { label: string; username: string; password: string; note: string; kind?: "ok" | "warn" | "danger" };
 
 const presets: Preset[] = [
-  { label: "Developer", username: "dev", password: "dev", note: "masked view (no decrypt)" },
-  { label: "Agent", username: "agent", password: "agent", note: "decrypt sensitive, mask PII" },
-  { label: "Admin", username: "admin", password: "admin", note: "full access" }
+  { label: "Developer", username: "dev", password: "dev", note: "Read allowed, but sensitive/PII returned masked.", kind: undefined },
+  { label: "Agent", username: "agent", password: "agent", note: "Can write some resources. Decrypt sensitive, mask PII.", kind: "warn" },
+  { label: "Admin", username: "admin", password: "admin", note: "Full access. Can view audit logs.", kind: "ok" }
 ];
 
 export default function LoginAs() {
@@ -40,49 +41,61 @@ export default function LoginAs() {
 
   return (
     <div className="container">
-      <div className="card">
-        <h1>Login</h1>
-        <p className="muted">PoC login. Users are seeded in Postgres: dev/agent/admin.</p>
-
-        <div className="row">
-          {presets.map((p) => (
-            <div className="col" key={p.label}>
-              <div className="card" style={{ borderStyle: "dashed" }}>
-                <h2>{p.label}</h2>
-                <div className="muted">{p.note}</div>
-                <div style={{ height: 10 }} />
-                <button className="btn primary" disabled={loading} onClick={() => doLogin(p.username, p.password)}>
+      <div className="grid" style={{ gap: 18 }}>
+        <Card title="Login" subtitle="Seeded users in Postgres: dev/dev, agent/agent, admin/admin." right={<Pill>JWT → PEP → PIP/PDP → KMS</Pill>}>
+          <div className="grid cols-2">
+            {presets.map((p) => (
+              <div key={p.label} className="card dashed">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <h2>{p.label}</h2>
+                  <Pill kind={p.kind}>{p.username}</Pill>
+                </div>
+                <p>{p.note}</p>
+                <div style={{ height: 12 }} />
+                <Button variant="primary" disabled={loading} onClick={() => doLogin(p.username, p.password)}>
                   Login as {p.username}
-                </button>
+                </Button>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        <hr />
+          <hr />
 
-        <h2>Manual login</h2>
-        <div className="row">
-          <div className="col">
+          <h2>Manual login</h2>
+          <div className="grid cols-2">
             <div className="field">
               <label>Username</label>
               <input value={username} onChange={(e) => setUsername(e.target.value)} />
             </div>
-          </div>
-          <div className="col">
             <div className="field">
               <label>Password</label>
               <input value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
           </div>
-          <div className="col" style={{ alignSelf: "end" }}>
-            <button className="btn primary" disabled={loading} onClick={() => doLogin(username, password)}>
+          <div style={{ marginTop: 10 }}>
+            <Button variant="primary" disabled={loading} onClick={() => doLogin(username, password)}>
               Login
-            </button>
+            </Button>
+          </div>
+
+          {error ? <div style={{ marginTop: 12 }}><Alert kind="error">{error}</Alert></div> : null}
+        </Card>
+
+        <div className="grid cols-2">
+          <div className="card soft">
+            <h2>What you’re testing</h2>
+            <p>
+              The UI does not implement RBAC. It simply displays whatever the backend returns after enforcing DCS decisions
+              (decrypt/mask/deny per-field).
+            </p>
+          </div>
+          <div className="card soft">
+            <h2>Tip</h2>
+            <p>
+              Use <span className="kbd">Audit</span> as admin to see how each request was enforced.
+            </p>
           </div>
         </div>
-
-        {error ? <div className="error" style={{ marginTop: 10 }}>{error}</div> : null}
       </div>
     </div>
   );

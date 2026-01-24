@@ -3,6 +3,7 @@ import { useAuth } from "../state/auth";
 import type { FilmOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { createFilm, listFilms, updateFilmTime } from "../api/cinema";
+import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Films() {
   const auth = useAuth();
@@ -63,40 +64,52 @@ export default function Films() {
 
   return (
     <div className="container">
-      <div className="row">
-        <div className="col">
-          <div className="card">
-            <h1>Films</h1>
-            <div className="muted">time_elapsed is stored encrypted. PDP decides decrypt/mask per role.</div>
-            <div style={{ height: 10 }} />
-            <button className="btn" disabled={loading} onClick={refresh}>Refresh</button>
-            {error ? <div className="error" style={{ marginTop: 8 }}>{error}</div> : null}
+      <div className="grid cols-2">
+        <Card
+          title="Films"
+          subtitle="time_elapsed is stored encrypted. PDP decides whether to decrypt or mask it."
+          right={<Pill>{auth.role}</Pill>}
+        >
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Button onClick={refresh} disabled={loading}>Refresh</Button>
+            <span className="badge">
+              <span className="muted">Expected</span>
+              <strong>admin/agent</strong> decrypt, <strong>developer</strong> masked
+            </span>
+          </div>
 
-            <table className="table" style={{ marginTop: 10 }}>
+          {error ? <div style={{ marginTop: 12 }}><Alert kind="error">{error}</Alert></div> : null}
+
+          <div style={{ marginTop: 12 }} className="tablewrap">
+            <table className="table">
               <thead>
                 <tr>
                   <th>ID</th>
                   <th>Title</th>
-                  <th>Time elapsed</th>
+                  <th>time_elapsed</th>
                 </tr>
               </thead>
               <tbody>
+                {loading && !items.length ? (
+                  <tr><td colSpan={3}><SkeletonRow /></td></tr>
+                ) : null}
                 {items.map((f) => (
                   <tr key={f.id}>
-                    <td className="muted">{f.id}</td>
+                    <td className="mono muted">{f.id}</td>
                     <td>{f.title}</td>
-                    <td>{String(f.time_elapsed)}</td>
+                    <td><Mono>{String(f.time_elapsed)}</Mono></td>
                   </tr>
                 ))}
-                {!items.length ? <tr><td colSpan={3} className="muted">No films yet.</td></tr> : null}
+                {!loading && !items.length ? (
+                  <tr><td colSpan={3} className="muted">No films yet.</td></tr>
+                ) : null}
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
 
-        <div className="col">
-          <div className="card">
-            <h1>Create film</h1>
+        <div className="grid" style={{ gap: 14 }}>
+          <Card title="Create film" subtitle="Write is allowed for agent/admin. Developer should get 403.">
             <div className="field">
               <label>Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -105,11 +118,13 @@ export default function Films() {
               <label>Initial time_elapsed (seconds)</label>
               <input type="number" value={timeElapsed} onChange={(e) => setTimeElapsed(Number(e.target.value))} />
             </div>
-            <button className="btn primary" disabled={loading} onClick={onCreate}>Create</button>
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <Button variant="primary" disabled={loading} onClick={onCreate}>Create</Button>
+              <Button variant="ghost" disabled={loading} onClick={() => { setTitle("Interstellar"); setTimeElapsed(0); }}>Reset</Button>
+            </div>
+          </Card>
 
-            <hr />
-
-            <h1>Update time_elapsed</h1>
+          <Card title="Update time_elapsed" subtitle="Demonstrates frequent writes + read-time enforcement.">
             <div className="field">
               <label>Film</label>
               <select value={editFilmId} onChange={(e) => setEditFilmId(e.target.value)}>
@@ -121,12 +136,10 @@ export default function Films() {
               <label>New time_elapsed (seconds)</label>
               <input type="number" value={editTime} onChange={(e) => setEditTime(Number(e.target.value))} />
             </div>
-            <button className="btn primary" disabled={loading || !editFilmId} onClick={onUpdate}>Update</button>
-
-            <div style={{ marginTop: 10 }} className="muted">
-              Expected: admin sees number; agent sees number; developer sees masked value.
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <Button variant="primary" disabled={loading || !editFilmId} onClick={onUpdate}>Update</Button>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </div>

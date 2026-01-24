@@ -15,7 +15,6 @@ type AuthContextType = AuthState & {
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
-
 const STORAGE_KEY = "cinema_dcs_session_v1";
 
 function loadInitial(): AuthState {
@@ -41,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: resp.role,
           tenantId: resp.tenant_id,
           userId: resp.user_id,
-          username: resp.username,
+          username: resp.username
         };
         setState(next);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -50,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const next: AuthState = { token: null, role: null, tenantId: null, userId: null, username: null };
         setState(next);
         localStorage.removeItem(STORAGE_KEY);
-      },
+      }
     };
   }, [state]);
 
