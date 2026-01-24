@@ -1,3 +1,5 @@
+import { STORAGE_KEY } from "../state/auth";
+
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export class ApiError extends Error {
@@ -23,7 +25,15 @@ export async function apiFetch<T>(
   const text = await res.text();
   const body = text ? safeJson(text) : null;
 
-  if (!res.ok) throw new ApiError(res.status, body);
+  if (!res.ok) {
+    if (res.status === 401) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        window.dispatchEvent(new Event("auth:logout"));
+      } catch {}
+    }
+    throw new ApiError(res.status, body);
+  }
   return body as T;
 }
 

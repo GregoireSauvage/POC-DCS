@@ -100,4 +100,5 @@ networks:
 
 volumes:
   pgdata:
+    name: poc-dcs-pgdata
   vaultdata:

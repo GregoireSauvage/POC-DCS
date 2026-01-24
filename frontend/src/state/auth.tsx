@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { LoginResponse, Role } from "../types/dto";
 
 type AuthState = {
@@ -15,7 +15,7 @@ type AuthContextType = AuthState & {
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
-const STORAGE_KEY = "cinema_dcs_session_v1";
+export const STORAGE_KEY = "cinema_dcs_session_v1";
 
 function loadInitial(): AuthState {
   try {
@@ -52,6 +52,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, [state]);
+
+  useEffect(() => {
+    const onLogout = () => api.logout();
+    window.addEventListener("auth:logout", onLogout);
+    return () => window.removeEventListener("auth:logout", onLogout);
+  }, [api]);
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
 }

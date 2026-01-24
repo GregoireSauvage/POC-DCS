@@ -1,6 +1,12 @@
 from dataclasses import dataclass
+from uuid import UUID
+
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
+
+from app.db.models.user import User
+from app.db.session import get_db
 from app.core.security.jwt import verify_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -13,18 +19,34 @@ class Principal:
     role: str
     scopes: list[str]
 
-def get_current_principal(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> Principal:
+def get_current_principal(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> Principal:
     if creds is None or not creds.credentials:
         raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <token>")
     try:
         payload = verify_token(creds.credentials)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+    try:
+        tenant_id = payload["tenant_id"]
+        user_id = UUID(payload["sub"])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = (
+        db.query(User)
+        .filter(User.tenant_id == tenant_id, User.id == user_id)
+        .one_or_none()
+    )
+    if user is None:
+        raise HTTPException(status_code=401, detail="Token user not found")
     return Principal(
-        tenant_id=payload["tenant_id"],
-        user_id=payload["sub"],
-        username=payload.get("username", ""),
-        role=payload.get("role", "developer"),
+        tenant_id=user.tenant_id,
+        user_id=str(user.id),
+        username=user.username,
+        role=user.role,
         scopes=payload.get("scopes", []),
     )
 
