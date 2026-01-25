@@ -19,6 +19,7 @@ export default function Nav() {
           <NavLink to="/halls" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Halls</NavLink>
           <NavLink to="/spectators" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Spectators</NavLink>
           <NavLink to="/audit" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Audit</NavLink>
+          <NavLink to="/perf" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>Perf</NavLink>
         </div>
 
         <div className="spacer" />

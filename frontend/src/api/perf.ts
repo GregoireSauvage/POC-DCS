@@ -1,0 +1,13 @@
+import type { PerfOut } from "../types/dto";
+import { apiFetch } from "./client";
+
+export function listPerf(
+  token: string,
+  params: { limit?: number; action?: string } = {}
+): Promise<PerfOut[]> {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.action) qs.set("action", params.action);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<PerfOut[]>(`/perf/${suffix}`, { method: "GET", token });
+}

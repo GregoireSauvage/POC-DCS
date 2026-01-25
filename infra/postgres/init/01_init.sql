@@ -93,3 +93,27 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_req ON audit_logs(request_id);
+
+-- ---------- PERF LOGS ----------
+CREATE TABLE IF NOT EXISTS perf_logs (
+  id               BIGSERIAL PRIMARY KEY,
+  ts               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  request_id       TEXT NOT NULL,
+
+  tenant_id        TEXT NOT NULL,
+  subject_user_id  UUID,
+  subject_role     TEXT,
+
+  action           TEXT NOT NULL,
+  resource_type    TEXT NOT NULL,
+  dcs_enabled      BOOLEAN NOT NULL,
+
+  total_ms         DOUBLE PRECISION,
+  pip_ms           DOUBLE PRECISION,
+  pdp_ms           DOUBLE PRECISION,
+  kms_ms           DOUBLE PRECISION,
+  db_ms            DOUBLE PRECISION
+);
+
+CREATE INDEX IF NOT EXISTS idx_perf_ts ON perf_logs(ts);
+CREATE INDEX IF NOT EXISTS idx_perf_action ON perf_logs(action);

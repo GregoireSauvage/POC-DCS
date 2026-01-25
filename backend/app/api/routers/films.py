@@ -9,7 +9,9 @@ from app.schemas.film import FilmCreate, FilmOut
 from app.dcs.pip.provider import build_policy_input
 from app.dcs.pdp.engine import evaluate, decision_hash
 from app.dcs.pep.data_pep import apply_decision
+from app.dcs.pep.mode import dcs_enabled
 from app.services.audit_service import write_audit
+from app.services.perf_service import write_perf
 from app.services.cinema_service import create_film, update_film_time
 
 router = APIRouter()
@@ -53,6 +55,17 @@ def list_films(request: Request, db: Session = Depends(get_db), p: Principal = D
             details={},
         )
         out.append(payload)
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="film.read",
+        resource_type="film",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
+    )
     return out
 
 @router.post("/", response_model=FilmOut)
@@ -73,6 +86,17 @@ def create_one(request: Request, payload: FilmCreate, db: Session = Depends(get_
             outcome="deny", decision_hash=dh,
             fields_decrypted=[], fields_masked=[], fields_denied=[],
             details={"reason": dec.reason},
+        )
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="film.create",
+            resource_type="film",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
         )
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -96,6 +120,17 @@ def create_one(request: Request, payload: FilmCreate, db: Session = Depends(get_
     dec_r = evaluate(pi_r)
     row = {"title": film.title, "time_elapsed_ct": film.time_elapsed_ct}
     applied = apply_decision(decision=dec_r, ciphertext_row=row, field_to_ciphertext={"time_elapsed":"time_elapsed_ct"})
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="film.create",
+        resource_type="film",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
+    )
     return {"id": film.id, "title": film.title, "time_elapsed": applied.payload.get("time_elapsed")}
 
 @router.patch("/{film_id}/time", response_model=FilmOut)
@@ -123,6 +158,17 @@ def update_time(
             fields_decrypted=[], fields_masked=[], fields_denied=[],
             details={"reason": dec.reason},
         )
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="film.update_time",
+            resource_type="film",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
     film = update_film_time(db, tenant_id=p.tenant_id, film_id=film_id, time_elapsed=time_elapsed)
@@ -145,5 +191,16 @@ def update_time(
         outcome="allow", decision_hash=dh,
         fields_decrypted=[], fields_masked=[], fields_denied=[],
         details={"new_time_elapsed": time_elapsed},
+    )
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="film.update_time",
+        resource_type="film",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
     )
     return {"id": film.id, "title": film.title, "time_elapsed": applied.payload.get("time_elapsed")}

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.db.session import get_db
 from app.core.security.auth import Principal, get_current_principal
@@ -7,6 +8,8 @@ from app.db.models.audit_log import AuditLog
 from app.schemas.audit import AuditOut
 from app.dcs.pip.provider import build_policy_input
 from app.dcs.pdp.engine import evaluate
+from app.dcs.pep.mode import dcs_enabled
+from app.services.perf_service import write_perf
 
 router = APIRouter()
 
@@ -20,10 +23,21 @@ def list_audit(request: Request, db: Session = Depends(get_db), p: Principal = D
     )
     dec = evaluate(pi)
     if not dec.allow:
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="audit.read",
+            resource_type="audit",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
     rows = db.query(AuditLog).order_by(AuditLog.ts.desc()).limit(200).all()
-    return [
+    out = [
         {
             "ts": r.ts,
             "request_id": r.request_id,
@@ -40,3 +54,15 @@ def list_audit(request: Request, db: Session = Depends(get_db), p: Principal = D
         }
         for r in rows
     ]
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="audit.read",
+        resource_type="audit",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
+    )
+    return out

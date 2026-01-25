@@ -28,3 +28,19 @@ export type AuditOut = {
   fields_masked: string[];
   fields_denied: string[];
 };
+
+export type PerfOut = {
+  ts: string;
+  request_id: string;
+  tenant_id: string;
+  subject_user_id: string | null;
+  subject_role: string | null;
+  action: string;
+  resource_type: string;
+  dcs_enabled: boolean;
+  total_ms: number | null;
+  pip_ms: number | null;
+  pdp_ms: number | null;
+  kms_ms: number | null;
+  db_ms: number | null;
+};

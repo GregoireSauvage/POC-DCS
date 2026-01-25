@@ -9,6 +9,7 @@ import Films from "./pages/Films";
 import Halls from "./pages/Halls";
 import Spectators from "./pages/Spectators";
 import Audit from "./pages/Audit";
+import Performance from "./pages/Performance";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/halls" element={<RequireAuth><Halls /></RequireAuth>} />
         <Route path="/spectators" element={<RequireAuth><Spectators /></RequireAuth>} />
         <Route path="/audit" element={<RequireAuth><Audit /></RequireAuth>} />
+        <Route path="/perf" element={<RequireAuth><Performance /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 from app.dcs.kms.vault_transit import VaultClient
 from app.dcs.pdp.types import Decision
+from app.dcs.pep.mode import dcs_enabled
 
 vault = VaultClient()
 
@@ -56,6 +57,16 @@ def apply_decision(
             masked=[],
             denied=list(decision.field_actions.keys()),
         )
+
+    if not dcs_enabled():
+        out: dict[str, Any] = {}
+        ct_values = set(field_to_ciphertext.values())
+        for key, val in ciphertext_row.items():
+            if key not in ct_values:
+                out[key] = val
+        for field, ct_key in field_to_ciphertext.items():
+            out[field] = ciphertext_row.get(ct_key)
+        return ApplyResult(payload=out, decrypted=[], masked=[], denied=[])
 
     for field, action in decision.field_actions.items():
         if action == "deny":

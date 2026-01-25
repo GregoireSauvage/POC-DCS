@@ -10,7 +10,9 @@ from app.schemas.spectator import SpectatorCreate, SpectatorOut
 from app.dcs.pip.provider import build_policy_input
 from app.dcs.pdp.engine import evaluate, decision_hash
 from app.dcs.pep.data_pep import apply_decision, mask_uuid
+from app.dcs.pep.mode import dcs_enabled
 from app.services.audit_service import write_audit
+from app.services.perf_service import write_perf
 from app.services.cinema_service import add_spectator
 from app.dcs.kms.vault_transit import VaultClient
 from app.dcs.crypto.lookup import normalize_external_id, hmac_lookup
@@ -45,6 +47,17 @@ def create_one(request: Request, payload: SpectatorCreate, db: Session = Depends
             fields_decrypted=[], fields_masked=[], fields_denied=[],
             details={"reason": dec.reason},
         )
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="spectator.create",
+            resource_type="spectator",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
     sp = add_spectator(
@@ -71,7 +84,7 @@ def create_one(request: Request, payload: SpectatorCreate, db: Session = Depends
     row = {"id": sp.id, "hall_id": sp.hall_id, "name_ct": sp.name_ct, "age_ct": sp.age_ct, "external_id_ct": sp.external_id_ct}
     applied = apply_decision(decision=dec_r, ciphertext_row=row, field_to_ciphertext={"name":"name_ct","age":"age_ct","external_id":"external_id_ct"})
 
-    spectator_id = str(sp.id) if p.role == "admin" else mask_uuid(str(sp.id))
+    spectator_id = str(sp.id) if (p.role == "admin" or not dcs_enabled()) else mask_uuid(str(sp.id))
 
     write_audit(
         db=db, request_id=request.state.request_id, tenant_id=p.tenant_id,
@@ -80,6 +93,18 @@ def create_one(request: Request, payload: SpectatorCreate, db: Session = Depends
         outcome="allow", decision_hash=dh,
         fields_decrypted=[], fields_masked=[], fields_denied=[],
         details={"hall_id": str(payload.hall_id)},
+    )
+
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="spectator.create",
+        resource_type="spectator",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
     )
 
     return {
@@ -118,6 +143,17 @@ def search_by_external_id(
             fields_decrypted=[], fields_masked=[], fields_denied=[],
             details={"reason": dec.reason},
         )
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="search.spectator",
+            resource_type="spectator",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
     pepper = vault.get_pepper()
@@ -139,7 +175,7 @@ def search_by_external_id(
         dec_r = evaluate(pi_r)
         row = {"id": sp.id, "hall_id": sp.hall_id, "name_ct": sp.name_ct, "age_ct": sp.age_ct, "external_id_ct": sp.external_id_ct}
         applied = apply_decision(decision=dec_r, ciphertext_row=row, field_to_ciphertext={"name":"name_ct","age":"age_ct","external_id":"external_id_ct"})
-        spectator_id = str(sp.id) if p.role == "admin" else mask_uuid(str(sp.id))
+        spectator_id = str(sp.id) if (p.role == "admin" or not dcs_enabled()) else mask_uuid(str(sp.id))
         out.append({
             "id": spectator_id,
             "hall_id": sp.hall_id,
@@ -155,5 +191,16 @@ def search_by_external_id(
         outcome="allow", decision_hash=dh,
         fields_decrypted=[], fields_masked=[], fields_denied=[],
         details={"matches": len(out)},
+    )
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="search.spectator",
+        resource_type="spectator",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
     )
     return out

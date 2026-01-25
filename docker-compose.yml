@@ -60,6 +60,7 @@ services:
       VAULT_TRANSIT_KEY: cinema-dcs
       VAULT_KV_PEPPER_PATH: secret/dcs   # KV v2 -> vault kv get secret/dcs
       ENV: dev
+      DCS_MODE: off
     depends_on:
       postgres:
         condition: service_healthy

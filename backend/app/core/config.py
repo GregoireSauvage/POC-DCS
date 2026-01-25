@@ -4,6 +4,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     ENV: str = "dev"
+    DCS_MODE: str = "on"
 
     DATABASE_URL: str
 

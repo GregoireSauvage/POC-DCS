@@ -10,7 +10,9 @@ from app.schemas.hall import HallOut, HallCreate
 from app.dcs.pip.provider import build_policy_input
 from app.dcs.pdp.engine import evaluate, decision_hash
 from app.dcs.pep.data_pep import mask_uuid
+from app.dcs.pep.mode import dcs_enabled
 from app.services.audit_service import write_audit
+from app.services.perf_service import write_perf
 from app.services.cinema_service import create_hall
 
 router = APIRouter()
@@ -70,6 +72,17 @@ def list_halls(request: Request, db: Session = Depends(get_db), p: Principal = D
             details={},
         )
         out.append(payload)
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="hall.read",
+        resource_type="hall",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
+    )
     return out
 
 @router.post("/", response_model=HallOut)
@@ -91,6 +104,17 @@ def create_one(request: Request, payload: HallCreate, db: Session = Depends(get_
             fields_decrypted=[], fields_masked=[], fields_denied=[],
             details={"reason": dec.reason},
         )
+        write_perf(
+            db=db,
+            request_id=request.state.request_id,
+            tenant_id=p.tenant_id,
+            subject_user_id=UUID(p.user_id),
+            subject_role=p.role,
+            action="hall.create",
+            resource_type="hall",
+            dcs_enabled=dcs_enabled(),
+            perf=getattr(request.state, "perf", None),
+        )
         raise HTTPException(status_code=403, detail="Forbidden")
 
     hall = create_hall(
@@ -107,5 +131,16 @@ def create_one(request: Request, payload: HallCreate, db: Session = Depends(get_
         outcome="allow", decision_hash=dh,
         fields_decrypted=[], fields_masked=[], fields_denied=[],
         details={"name": payload.name},
+    )
+    write_perf(
+        db=db,
+        request_id=request.state.request_id,
+        tenant_id=p.tenant_id,
+        subject_user_id=UUID(p.user_id),
+        subject_role=p.role,
+        action="hall.create",
+        resource_type="hall",
+        dcs_enabled=dcs_enabled(),
+        perf=getattr(request.state, "perf", None),
     )
     return {"id": hall.id, "name": hall.name, "current_film_id": hall.current_film_id, "owner_user_id": hall.owner_user_id, "spectator_count": 0}
