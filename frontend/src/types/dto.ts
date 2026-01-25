@@ -44,3 +44,10 @@ export type PerfOut = {
   kms_ms: number | null;
   db_ms: number | null;
 };
+
+export type PerfSummaryOut = {
+  action: string;
+  dcs_enabled: boolean;
+  avg_total_ms: number | null;
+  count: number;
+};

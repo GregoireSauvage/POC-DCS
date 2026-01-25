@@ -17,3 +17,10 @@ class PerfOut(BaseModel):
     pdp_ms: float | None
     kms_ms: float | None
     db_ms: float | None
+
+
+class PerfSummaryOut(BaseModel):
+    action: str
+    dcs_enabled: bool
+    avg_total_ms: float | None
+    count: int

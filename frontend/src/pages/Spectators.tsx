@@ -3,6 +3,8 @@ import { useAuth } from "../state/auth";
 import type { HallOut, SpectatorOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { createSpectator, listHalls, searchSpectator } from "../api/cinema";
+import { listPerfSummary } from "../api/perf";
+import { PerfSummaryBadge, buildPerfSummary, type PerfSummaryMap } from "../components/PerfSummary";
 import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Spectators() {
@@ -12,6 +14,7 @@ export default function Spectators() {
   const [halls, setHalls] = useState<HallOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [perfSummary, setPerfSummary] = useState<PerfSummaryMap | null>(null);
 
   const [hallId, setHallId] = useState<string>("");
   const [name, setName] = useState("Alice");
@@ -33,9 +36,20 @@ export default function Spectators() {
     } finally {
       setLoading(false);
     }
+    await refreshPerf();
   }
 
-  useEffect(() => { refreshHalls(); }, []);
+  async function refreshPerf() {
+    if (auth.role !== "admin") return;
+    try {
+      const rows = await listPerfSummary(token);
+      setPerfSummary(buildPerfSummary(rows));
+    } catch {
+      setPerfSummary(null);
+    }
+  }
+
+  useEffect(() => { refreshHalls(); refreshPerf(); }, [auth.role, token]);
 
   async function onCreate() {
     if (!hallId) return;
@@ -44,6 +58,7 @@ export default function Spectators() {
     try {
       const sp = await createSpectator(token, { hall_id: hallId, name, age, external_id: externalId });
       setSearchResults([sp]);
+      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -57,6 +72,7 @@ export default function Spectators() {
     try {
       const res = await searchSpectator(token, searchExternalId);
       setSearchResults(res);
+      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -70,7 +86,12 @@ export default function Spectators() {
         <Card
           title="Spectators"
           subtitle="Encrypted fields: name / age / ticket. Search uses HMAC lookup (exact match)."
-          right={<Pill>{auth.role}</Pill>}
+          right={
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Pill>{auth.role}</Pill>
+              {auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="spectator.create" /> : null}
+            </div>
+          }
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Button onClick={refreshHalls} disabled={loading}>Refresh halls</Button>
@@ -111,7 +132,11 @@ export default function Spectators() {
           </div>
         </Card>
 
-        <Card title="Search by ticket ID" subtitle="Exact match on HMAC(ticket). Plaintext ticket never stored in DB index.">
+        <Card
+          title="Search by ticket ID"
+          subtitle="Exact match on HMAC(ticket). Plaintext ticket never stored in DB index."
+          right={auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="search.spectator" /> : null}
+        >
           <div className="field">
             <label>Ticket ID</label>
             <input value={searchExternalId} onChange={(e) => setSearchExternalId(e.target.value)} />

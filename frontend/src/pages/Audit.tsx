@@ -3,6 +3,8 @@ import { useAuth } from "../state/auth";
 import type { AuditOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { listAudit } from "../api/cinema";
+import { listPerfSummary } from "../api/perf";
+import { PerfSummaryBadge, buildPerfSummary, type PerfSummaryMap } from "../components/PerfSummary";
 import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Audit() {
@@ -12,6 +14,7 @@ export default function Audit() {
   const [items, setItems] = useState<AuditOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [perfSummary, setPerfSummary] = useState<PerfSummaryMap | null>(null);
 
   async function refresh() {
     setError(null);
@@ -24,16 +27,32 @@ export default function Audit() {
     } finally {
       setLoading(false);
     }
+    await refreshPerf();
   }
 
-  useEffect(() => { refresh(); }, []);
+  async function refreshPerf() {
+    if (auth.role !== "admin") return;
+    try {
+      const rows = await listPerfSummary(token);
+      setPerfSummary(buildPerfSummary(rows));
+    } catch {
+      setPerfSummary(null);
+    }
+  }
+
+  useEffect(() => { refresh(); refreshPerf(); }, [auth.role, token]);
 
   return (
     <div className="container">
       <Card
         title="Audit"
         subtitle="Admin only. Shows enforcement results per request (decrypt/mask/deny)."
-        right={<Pill kind="ok">{auth.role}</Pill>}
+        right={
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <Pill kind="ok">{auth.role}</Pill>
+            {auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="audit.read" /> : null}
+          </div>
+        }
       >
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Button onClick={refresh} disabled={loading}>Refresh</Button>

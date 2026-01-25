@@ -3,6 +3,8 @@ import { useAuth } from "../state/auth";
 import type { FilmOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { createFilm, listFilms, updateFilmTime } from "../api/cinema";
+import { listPerfSummary } from "../api/perf";
+import { PerfSummaryBadge, buildPerfSummary, type PerfSummaryMap } from "../components/PerfSummary";
 import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Films() {
@@ -12,6 +14,7 @@ export default function Films() {
   const [items, setItems] = useState<FilmOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [perfSummary, setPerfSummary] = useState<PerfSummaryMap | null>(null);
 
   const [title, setTitle] = useState("Interstellar");
   const [timeElapsed, setTimeElapsed] = useState<number>(0);
@@ -31,9 +34,20 @@ export default function Films() {
     } finally {
       setLoading(false);
     }
+    await refreshPerf();
   }
 
-  useEffect(() => { refresh(); }, []);
+  async function refreshPerf() {
+    if (auth.role !== "admin") return;
+    try {
+      const rows = await listPerfSummary(token);
+      setPerfSummary(buildPerfSummary(rows));
+    } catch {
+      setPerfSummary(null);
+    }
+  }
+
+  useEffect(() => { refresh(); refreshPerf(); }, [auth.role, token]);
 
   async function onCreate() {
     setError(null);
@@ -41,6 +55,7 @@ export default function Films() {
     try {
       await createFilm(token, { title, time_elapsed: timeElapsed });
       await refresh();
+      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -55,6 +70,7 @@ export default function Films() {
     try {
       await updateFilmTime(token, editFilmId, editTime);
       await refresh();
+      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -68,7 +84,12 @@ export default function Films() {
         <Card
           title="Films"
           subtitle="time_elapsed is stored encrypted. PDP decides whether to decrypt or mask it."
-          right={<Pill>{auth.role}</Pill>}
+          right={
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Pill>{auth.role}</Pill>
+              {auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="film.read" /> : null}
+            </div>
+          }
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Button onClick={refresh} disabled={loading}>Refresh</Button>
@@ -109,7 +130,11 @@ export default function Films() {
         </Card>
 
         <div className="grid" style={{ gap: 14 }}>
-          <Card title="Create film" subtitle="Write is allowed for agent/admin. Developer should get 403.">
+          <Card
+            title="Create film"
+            subtitle="Write is allowed for agent/admin. Developer should get 403."
+            right={auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="film.create" /> : null}
+          >
             <div className="field">
               <label>Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -124,7 +149,11 @@ export default function Films() {
             </div>
           </Card>
 
-          <Card title="Update time_elapsed" subtitle="Demonstrates frequent writes + read-time enforcement.">
+          <Card
+            title="Update time_elapsed"
+            subtitle="Demonstrates frequent writes + read-time enforcement."
+            right={auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="film.update_time" /> : null}
+          >
             <div className="field">
               <label>Film</label>
               <select value={editFilmId} onChange={(e) => setEditFilmId(e.target.value)}>

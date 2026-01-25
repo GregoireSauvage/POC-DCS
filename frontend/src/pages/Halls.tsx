@@ -3,6 +3,8 @@ import { useAuth } from "../state/auth";
 import type { FilmOut, HallOut } from "../types/dto";
 import { ApiError } from "../api/client";
 import { createHall, listFilms, listHalls } from "../api/cinema";
+import { listPerfSummary } from "../api/perf";
+import { PerfSummaryBadge, buildPerfSummary, type PerfSummaryMap } from "../components/PerfSummary";
 import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Halls() {
@@ -13,6 +15,7 @@ export default function Halls() {
   const [halls, setHalls] = useState<HallOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [perfSummary, setPerfSummary] = useState<PerfSummaryMap | null>(null);
 
   const [name, setName] = useState("Hall A");
   const [currentFilmId, setCurrentFilmId] = useState<string>("");
@@ -30,9 +33,20 @@ export default function Halls() {
     } finally {
       setLoading(false);
     }
+    await refreshPerf();
   }
 
-  useEffect(() => { refresh(); }, []);
+  async function refreshPerf() {
+    if (auth.role !== "admin") return;
+    try {
+      const rows = await listPerfSummary(token);
+      setPerfSummary(buildPerfSummary(rows));
+    } catch {
+      setPerfSummary(null);
+    }
+  }
+
+  useEffect(() => { refresh(); refreshPerf(); }, [auth.role, token]);
 
   async function onCreate() {
     if (!currentFilmId) return;
@@ -41,6 +55,7 @@ export default function Halls() {
     try {
       await createHall(token, { name, current_film_id: currentFilmId, owner_user_id: auth.userId! });
       await refresh();
+      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -54,7 +69,12 @@ export default function Halls() {
         <Card
           title="Halls"
           subtitle="Shows metadata + spectator_count (computed in SQL). IDs may be masked depending on role."
-          right={<Pill>{auth.role}</Pill>}
+          right={
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Pill>{auth.role}</Pill>
+              {auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="hall.read" /> : null}
+            </div>
+          }
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Button onClick={refresh} disabled={loading}>Refresh</Button>
@@ -101,7 +121,12 @@ export default function Halls() {
         <Card
           title="Create hall"
           subtitle="Only agent/admin can create. Owner is the current user in this PoC."
-          right={<Pill kind={auth.role === "admin" ? "ok" : auth.role === "agent" ? "warn" : "danger"}>{auth.role}</Pill>}
+          right={
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Pill kind={auth.role === "admin" ? "ok" : auth.role === "agent" ? "warn" : "danger"}>{auth.role}</Pill>
+              {auth.role === "admin" ? <PerfSummaryBadge summary={perfSummary} action="hall.create" /> : null}
+            </div>
+          }
         >
           <div className="field">
             <label>Name</label>

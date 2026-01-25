@@ -1,4 +1,4 @@
-import type { PerfOut } from "../types/dto";
+import type { PerfOut, PerfSummaryOut } from "../types/dto";
 import { apiFetch } from "./client";
 
 export function listPerf(
@@ -10,4 +10,14 @@ export function listPerf(
   if (params.action) qs.set("action", params.action);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiFetch<PerfOut[]>(`/perf/${suffix}`, { method: "GET", token });
+}
+
+export function listPerfSummary(
+  token: string,
+  params: { action?: string } = {}
+): Promise<PerfSummaryOut[]> {
+  const qs = new URLSearchParams();
+  if (params.action) qs.set("action", params.action);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<PerfSummaryOut[]>(`/perf/summary${suffix}`, { method: "GET", token });
 }

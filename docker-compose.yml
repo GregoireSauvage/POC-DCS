@@ -58,9 +58,9 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: backend-token
       VAULT_TRANSIT_KEY: cinema-dcs
-      VAULT_KV_PEPPER_PATH: secret/dcs   # KV v2 -> vault kv get secret/dcs
+      VAULT_KV_PEPPER_PATH: secret/dcs
       ENV: dev
-      DCS_MODE: off
+      DCS_MODE: on
     depends_on:
       postgres:
         condition: service_healthy
