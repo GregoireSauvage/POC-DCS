@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.logging import RequestIdMiddleware
 from app.observability.middleware import PerfMiddleware
-from app.api.routers import auth, films, halls, spectators, audit, health, perf
+from app.api.routers import auth, films, halls, spectators, audit, health, perf, admin
 
 app = FastAPI(title="Cinema DCS PoC", version="0.1.0")
 
@@ -26,3 +26,4 @@ app.include_router(halls.router, prefix="/halls", tags=["halls"])
 app.include_router(spectators.router, prefix="/spectators", tags=["spectators"])
 app.include_router(audit.router, prefix="/audit", tags=["audit"])
 app.include_router(perf.router, prefix="/perf", tags=["perf"])
+app.include_router(admin.router, prefix="/admin", tags=["admin"])

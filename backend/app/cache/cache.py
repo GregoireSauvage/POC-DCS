@@ -6,6 +6,7 @@ from threading import Lock
 from typing import Callable, Generic, Hashable, TypeVar
 
 from app.core.config import settings
+from app.core.runtime_settings import get_cache_level
 
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
@@ -54,7 +55,18 @@ class TTLCache(Generic[K, V]):
 
 
 def cache_level_enabled(level: int) -> bool:
-    return settings.CACHE_LEVEL >= level
+    return get_cache_level() >= level
+
+
+def clear_all_caches() -> None:
+    with classification_cache._lock:
+        classification_cache._store.clear()
+    with pdp_cache._lock:
+        pdp_cache._store.clear()
+    with kms_cache._lock:
+        kms_cache._store.clear()
+    with pepper_cache._lock:
+        pepper_cache._store.clear()
 
 
 classification_cache: TTLCache[str, dict[str, str]] = TTLCache(

@@ -1,9 +1,9 @@
-from app.core.config import settings
 from app.core.dcs_config import get_dcs_config
+from app.core.runtime_settings import get_dcs_mode
 
 
 def dcs_enabled() -> bool:
-    return settings.DCS_MODE.lower() not in ("off", "false", "0", "no")
+    return str(get_dcs_mode()).lower() not in ("off", "false", "0", "no")
 
 
 def allow_without_dcs(action: str, role: str) -> bool:

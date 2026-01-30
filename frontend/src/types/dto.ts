@@ -53,3 +53,10 @@ export type PerfSummaryOut = {
   avg_total_ms: number | null;
   count: number;
 };
+
+export type AdminSettingsOut = {
+  dcs_mode: "on" | "off";
+  cache_level: number;
+};
+
+export type AdminSettingsUpdate = Partial<AdminSettingsOut>;

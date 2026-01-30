@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.core.config import settings
+from app.core.runtime_settings import get_cache_level
 from app.core.security.auth import Principal, require_role
 from app.db.session import get_db
 from app.db.models.perf_log import PerfLog
@@ -51,7 +51,7 @@ def perf_summary(
     p: Principal = Depends(require_role("admin")),
 ):
     if cache_level is None:
-        cache_level = settings.CACHE_LEVEL
+        cache_level = get_cache_level()
     q = (
         db.query(
             PerfLog.action,
