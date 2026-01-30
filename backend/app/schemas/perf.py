@@ -12,6 +12,7 @@ class PerfOut(BaseModel):
     action: str
     resource_type: str
     dcs_enabled: bool
+    cache_level: int
     total_ms: float | None
     pip_ms: float | None
     pdp_ms: float | None
@@ -22,5 +23,6 @@ class PerfOut(BaseModel):
 class PerfSummaryOut(BaseModel):
     action: str
     dcs_enabled: bool
+    cache_level: int
     avg_total_ms: float | None
     count: int

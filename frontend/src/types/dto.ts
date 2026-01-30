@@ -38,6 +38,7 @@ export type PerfOut = {
   action: string;
   resource_type: string;
   dcs_enabled: boolean;
+  cache_level: number;
   total_ms: number | null;
   pip_ms: number | null;
   pdp_ms: number | null;
@@ -48,6 +49,7 @@ export type PerfOut = {
 export type PerfSummaryOut = {
   action: string;
   dcs_enabled: boolean;
+  cache_level: number;
   avg_total_ms: number | null;
   count: number;
 };

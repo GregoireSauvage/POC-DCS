@@ -14,10 +14,11 @@ export function listPerf(
 
 export function listPerfSummary(
   token: string,
-  params: { action?: string } = {}
+  params: { action?: string; cache_level?: number } = {}
 ): Promise<PerfSummaryOut[]> {
   const qs = new URLSearchParams();
   if (params.action) qs.set("action", params.action);
+  if (typeof params.cache_level === "number") qs.set("cache_level", String(params.cache_level));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiFetch<PerfSummaryOut[]>(`/perf/summary${suffix}`, { method: "GET", token });
 }

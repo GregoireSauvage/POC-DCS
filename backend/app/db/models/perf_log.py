@@ -1,4 +1,4 @@
-from sqlalchemy import String, DateTime, func, BigInteger, Float, Boolean
+from sqlalchemy import String, DateTime, func, BigInteger, Float, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 import uuid
@@ -19,6 +19,7 @@ class PerfLog(Base):
     action: Mapped[str] = mapped_column(String, nullable=False)
     resource_type: Mapped[str] = mapped_column(String, nullable=False)
     dcs_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    cache_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     total_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     pip_ms: Mapped[float | None] = mapped_column(Float, nullable=True)

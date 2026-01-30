@@ -5,6 +5,14 @@ class Settings(BaseSettings):
 
     ENV: str = "dev"
     DCS_MODE: str = "on"
+    CACHE_LEVEL: int = 0
+    CACHE_TTL_CLASSIF_SEC: int = 300
+    CACHE_TTL_PDP_SEC: int = 60
+    CACHE_TTL_KMS_SEC: int = 10
+    CACHE_TTL_PEPPER_SEC: int = 300
+    CACHE_MAX_ENTRIES: int = 500
+
+    DCS_CONFIG_PATH: str = ""
 
     DATABASE_URL: str
 

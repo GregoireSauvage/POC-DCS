@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS perf_logs (
   action           TEXT NOT NULL,
   resource_type    TEXT NOT NULL,
   dcs_enabled      BOOLEAN NOT NULL,
+  cache_level      INTEGER NOT NULL DEFAULT 0,
 
   total_ms         DOUBLE PRECISION,
   pip_ms           DOUBLE PRECISION,

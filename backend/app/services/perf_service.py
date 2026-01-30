@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.db.models.perf_log import PerfLog
+from app.core.config import settings
 from app.observability.perf import PerfContext
 
 
@@ -27,6 +28,7 @@ def write_perf(
         action=action,
         resource_type=resource_type,
         dcs_enabled=dcs_enabled,
+        cache_level=settings.CACHE_LEVEL,
         total_ms=total_ms,
         pip_ms=metrics.get("pip_ms"),
         pdp_ms=metrics.get("pdp_ms"),

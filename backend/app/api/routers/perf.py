@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.config import settings
 from app.core.security.auth import Principal, require_role
 from app.db.session import get_db
 from app.db.models.perf_log import PerfLog
@@ -31,6 +32,7 @@ def list_perf(
             "action": r.action,
             "resource_type": r.resource_type,
             "dcs_enabled": r.dcs_enabled,
+            "cache_level": r.cache_level,
             "total_ms": r.total_ms,
             "pip_ms": r.pip_ms,
             "pdp_ms": r.pdp_ms,
@@ -44,26 +46,33 @@ def list_perf(
 @router.get("/summary", response_model=list[PerfSummaryOut])
 def perf_summary(
     action: str | None = Query(None),
+    cache_level: int | None = Query(None, ge=0),
     db: Session = Depends(get_db),
     p: Principal = Depends(require_role("admin")),
 ):
+    if cache_level is None:
+        cache_level = settings.CACHE_LEVEL
     q = (
         db.query(
             PerfLog.action,
             PerfLog.dcs_enabled,
+            PerfLog.cache_level,
             func.avg(PerfLog.total_ms).label("avg_total_ms"),
             func.count(PerfLog.id).label("count"),
         )
-        .group_by(PerfLog.action, PerfLog.dcs_enabled)
+        .group_by(PerfLog.action, PerfLog.dcs_enabled, PerfLog.cache_level)
         .order_by(PerfLog.action.asc())
     )
     if action:
         q = q.filter(PerfLog.action == action)
+    if cache_level is not None:
+        q = q.filter(PerfLog.cache_level == cache_level)
     rows = q.all()
     return [
         {
             "action": r.action,
             "dcs_enabled": r.dcs_enabled,
+            "cache_level": r.cache_level,
             "avg_total_ms": float(r.avg_total_ms) if r.avg_total_ms is not None else None,
             "count": int(r.count),
         }

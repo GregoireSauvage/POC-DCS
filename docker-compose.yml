@@ -61,6 +61,12 @@ services:
       VAULT_KV_PEPPER_PATH: secret/dcs
       ENV: dev
       DCS_MODE: on
+      CACHE_LEVEL: 1
+      CACHE_TTL_CLASSIF_SEC: 300
+      CACHE_TTL_PDP_SEC: 60
+      CACHE_TTL_KMS_SEC: 10
+      CACHE_TTL_PEPPER_SEC: 300
+      CACHE_MAX_ENTRIES: 500
     depends_on:
       postgres:
         condition: service_healthy

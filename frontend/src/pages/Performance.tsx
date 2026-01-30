@@ -31,6 +31,7 @@ export default function Performance() {
   }, [auth.role]);
 
   const summary = useMemo(() => summarize(rows), [rows]);
+  const cacheLevel = useMemo(() => summarizeCacheLevel(rows), [rows]);
 
   if (auth.role !== "admin") {
     return (
@@ -57,6 +58,12 @@ export default function Performance() {
             <span className="muted">DCS off avg</span>
             <strong>{summary.offAvg} ms</strong>
           </span>
+          {cacheLevel ? (
+            <span className="badge">
+              <span className="muted">Cache</span>
+              <strong>{cacheLevel}</strong>
+            </span>
+          ) : null}
         </div>
 
         {error ? <div style={{ marginTop: 12 }}><Alert kind="error">{error}</Alert></div> : null}
@@ -69,6 +76,7 @@ export default function Performance() {
                 <th>Action</th>
                 <th>Role</th>
                 <th>DCS</th>
+                <th>Cache</th>
                 <th>Total</th>
                 <th>PIP</th>
                 <th>PDP</th>
@@ -79,7 +87,7 @@ export default function Performance() {
             </thead>
             <tbody>
               {loading && !rows.length ? (
-                <tr><td colSpan={10}><SkeletonRow /></td></tr>
+                <tr><td colSpan={11}><SkeletonRow /></td></tr>
               ) : null}
               {rows.map((r) => (
                 <tr key={`${r.request_id}-${r.action}-${r.ts}`}>
@@ -91,6 +99,7 @@ export default function Performance() {
                       {r.dcs_enabled ? "on" : "off"}
                     </Pill>
                   </td>
+                  <td className="mono muted">L{r.cache_level}</td>
                   <td><Mono>{fmtMs(r.total_ms)}</Mono></td>
                   <td className="mono muted">{fmtMs(r.pip_ms)}</td>
                   <td className="mono muted">{fmtMs(r.pdp_ms)}</td>
@@ -100,7 +109,7 @@ export default function Performance() {
                 </tr>
               ))}
               {!loading && !rows.length ? (
-                <tr><td colSpan={10} className="muted">No perf logs yet.</td></tr>
+                <tr><td colSpan={11} className="muted">No perf logs yet.</td></tr>
               ) : null}
             </tbody>
           </table>
@@ -131,6 +140,13 @@ function summarize(rows: PerfOut[]) {
     onAvg: avg(onVals),
     offAvg: avg(offVals),
   };
+}
+
+function summarizeCacheLevel(rows: PerfOut[]) {
+  if (!rows.length) return "";
+  const levels = new Set(rows.map((r) => r.cache_level));
+  if (levels.size === 1) return `L${[...levels][0]}`;
+  return "mixed";
 }
 
 function avg(values: number[]) {

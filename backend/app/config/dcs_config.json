@@ -1,0 +1,36 @@
+{
+  "pip": {
+    "channel": "web",
+    "purpose": "cinema_ops",
+    "device_trust": 0.8,
+    "client_ip_header": "x-real-ip"
+  },
+  "pdp": {
+    "default_classification": "INTERNAL",
+    "read_actions": ["film.read", "hall.read", "spectator.read", "search.spectator"],
+    "write_actions": ["film.create", "hall.create", "spectator.create", "film.update_time"],
+    "bootstrap_actions": ["bootstrap"],
+    "audit_actions": ["audit.read"],
+    "role_classification_actions": {
+      "admin": {
+        "PUBLIC": "allow",
+        "INTERNAL": "allow",
+        "SENSITIVE": "decrypt",
+        "PII": "decrypt"
+      },
+      "agent": {
+        "PUBLIC": "allow",
+        "INTERNAL": "allow",
+        "SENSITIVE": "decrypt",
+        "PII": "mask_after_decrypt"
+      },
+      "developer": {
+        "PUBLIC": "allow",
+        "INTERNAL": "mask_after_decrypt",
+        "SENSITIVE": "mask_after_decrypt",
+        "PII": "mask_after_decrypt"
+      }
+    },
+    "spectator_agent_hardening_fields": ["name", "external_id"]
+  }
+}

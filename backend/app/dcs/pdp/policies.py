@@ -1,4 +1,5 @@
 from app.dcs.pip.types import PolicyInput
+from app.core.dcs_config import get_dcs_config
 
 def decide(policy_input: PolicyInput) -> tuple[bool, dict[str, str], str]:
     """
@@ -22,39 +23,26 @@ def decide(policy_input: PolicyInput) -> tuple[bool, dict[str, str], str]:
     if s.tenant_id != r.tenant_id:
         return False, {}, "tenant_mismatch"
 
+    cfg = get_dcs_config()
+    pdp_cfg = cfg.get("pdp", {})
+    role_matrix = pdp_cfg.get("role_classification_actions", {})
+    default_classification = pdp_cfg.get("default_classification", "INTERNAL")
+
     def action_for_classification(classification: str) -> str:
-        if s.role == "admin":
-            return "decrypt" if classification in ("PII", "SENSITIVE") else "allow"
-
-        if s.role == "agent":
-            if classification in ("PUBLIC", "INTERNAL"):
-                return "allow"
-            if classification == "SENSITIVE":
-                return "decrypt"
-            if classification == "PII":
-                return "mask_after_decrypt"
-            return "deny"
-
-        if s.role == "developer":
-            if classification == "PUBLIC":
-                return "allow"
-            if classification in ("INTERNAL", "PII", "SENSITIVE"):
-                return "mask_after_decrypt"
-            return "deny"
-
-        return "deny"
+        role_actions = role_matrix.get(s.role, {})
+        return role_actions.get(classification, "deny")
 
     # Coarse authorization per action
-    if action in ("film.read", "hall.read", "spectator.read", "search.spectator"):
+    if action in pdp_cfg.get("read_actions", []):
         allow = True
         reason = "read_allowed"
-    elif action in ("film.create", "hall.create", "spectator.create", "film.update_time"):
+    elif action in pdp_cfg.get("write_actions", []):
         allow = s.role in ("agent", "admin")
         reason = "write_allowed" if allow else "write_forbidden"
-    elif action == "bootstrap":
+    elif action in pdp_cfg.get("bootstrap_actions", []):
         allow = s.role == "admin"
         reason = "bootstrap_allowed" if allow else "bootstrap_forbidden"
-    elif action == "audit.read":
+    elif action in pdp_cfg.get("audit_actions", []):
         allow = s.role == "admin"
         reason = "audit_admin_only" if not allow else "audit_allowed"
     else:
@@ -64,12 +52,12 @@ def decide(policy_input: PolicyInput) -> tuple[bool, dict[str, str], str]:
         return False, {}, reason
 
     for field_name, meta in r.fields.items():
-        cls = meta.get("classification", "INTERNAL")
+        cls = meta.get("classification", default_classification)
         field_actions[field_name] = action_for_classification(cls)
 
     # Hardening: agent should never see spectator PII in clear even if misclassified
     if r.type == "spectator" and s.role == "agent":
-        for fn in ("name", "external_id"):
+        for fn in pdp_cfg.get("spectator_agent_hardening_fields", []):
             if fn in field_actions:
                 field_actions[fn] = "mask_after_decrypt"
 
