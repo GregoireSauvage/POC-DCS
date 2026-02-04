@@ -1,10 +1,13 @@
-from pydantic import BaseModel
 from uuid import UUID
+
+from pydantic import BaseModel
+
 
 class HallCreate(BaseModel):
     name: str
     current_film_id: UUID
     owner_user_id: UUID
+
 
 class HallOut(BaseModel):
     id: UUID

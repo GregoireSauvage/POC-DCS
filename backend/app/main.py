@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routers import admin, audit, auth, films, halls, health, perf, spectators
 from app.core.logging import RequestIdMiddleware
 from app.observability.middleware import PerfMiddleware
-from app.api.routers import auth, films, halls, spectators, audit, health, perf, admin
 
 app = FastAPI(title="Cinema DCS PoC", version="0.1.0")
 

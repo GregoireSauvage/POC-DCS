@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from time import monotonic
 from threading import Lock
-from typing import Callable, Generic, Hashable, TypeVar
+from time import monotonic
+from typing import Generic, TypeVar
 
 from app.core.config import settings
 from app.core.runtime_settings import get_cache_level

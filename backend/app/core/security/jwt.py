@@ -1,10 +1,15 @@
 from datetime import datetime, timedelta, timezone
+
 from jose import jwt
+
 from app.core.config import settings
 
 ALGO = "HS256"
 
-def issue_token(*, tenant_id: str, user_id: str, username: str, role: str, scopes: list[str]) -> str:
+
+def issue_token(
+    *, tenant_id: str, user_id: str, username: str, role: str, scopes: list[str]
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "iss": settings.JWT_ISSUER,
@@ -18,6 +23,7 @@ def issue_token(*, tenant_id: str, user_id: str, username: str, role: str, scope
         "scopes": scopes,
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=ALGO)
+
 
 def verify_token(token: str) -> dict:
     return jwt.decode(

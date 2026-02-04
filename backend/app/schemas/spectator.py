@@ -1,11 +1,14 @@
-from pydantic import BaseModel
 from uuid import UUID
+
+from pydantic import BaseModel
+
 
 class SpectatorCreate(BaseModel):
     hall_id: UUID
     name: str
     age: int
     external_id: str  # ticket id
+
 
 class SpectatorOut(BaseModel):
     id: UUID | str

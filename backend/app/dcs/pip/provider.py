@@ -1,11 +1,12 @@
-from sqlalchemy.orm import Session
 from fastapi import Request
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.dcs_config import get_dcs_config
 from app.core.security.auth import Principal
 from app.dcs.pep.mode import dcs_enabled
-from app.dcs.pip.types import Subject, Context, Resource, PolicyInput
 from app.dcs.pip.classification import get_classification_map
+from app.dcs.pip.types import Context, PolicyInput, Resource, Subject
 from app.observability.perf import perf_span
 
 

@@ -1,7 +1,9 @@
 import base64
+
 import requests
-from app.core.config import settings
+
 from app.cache.cache import cache_level_enabled, kms_cache, pepper_cache
+from app.core.config import settings
 from app.observability.perf import perf_span
 
 
@@ -19,9 +21,7 @@ class VaultClient:
         with perf_span("kms_ms"):
             b64 = base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
             url = f"{self.addr}/v1/transit/encrypt/{self.transit_key}"
-            r = requests.post(
-                url, headers=self._headers(), json={"plaintext": b64}, timeout=5
-            )
+            r = requests.post(url, headers=self._headers(), json={"plaintext": b64}, timeout=5)
             r.raise_for_status()
             return r.json()["data"]["ciphertext"]
 

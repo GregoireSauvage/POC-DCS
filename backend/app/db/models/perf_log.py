@@ -1,7 +1,9 @@
-from sqlalchemy import String, DateTime, func, BigInteger, Float, Boolean, Integer
+import uuid
+
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-import uuid
+
 from app.db.models.base import Base
 
 
@@ -9,7 +11,9 @@ class PerfLog(Base):
     __tablename__ = "perf_logs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ts: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ts: Mapped[object] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     request_id: Mapped[str] = mapped_column(String, nullable=False)
 
     tenant_id: Mapped[str] = mapped_column(String, nullable=False)

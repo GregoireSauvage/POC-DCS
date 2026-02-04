@@ -1,8 +1,11 @@
-from sqlalchemy import String, DateTime, func, ForeignKeyConstraint, Index, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB, BYTEA
-from sqlalchemy.orm import Mapped, mapped_column
-from app.db.models.base import Base
 import uuid
+
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.models.base import Base
+
 
 class Spectator(Base):
     __tablename__ = "spectators"
@@ -24,4 +27,6 @@ class Spectator(Base):
     external_id_lookup: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
 
     labels: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

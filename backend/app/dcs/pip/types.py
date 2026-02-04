@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Literal, Any
+from typing import Any, Literal
 
-Classification = Literal["PUBLIC","INTERNAL","PII","SENSITIVE"]
+Classification = Literal["PUBLIC", "INTERNAL", "PII", "SENSITIVE"]
+
 
 @dataclass(frozen=True)
 class Subject:
@@ -9,6 +10,7 @@ class Subject:
     tenant_id: str
     role: str
     username: str
+
 
 @dataclass(frozen=True)
 class Context:
@@ -19,6 +21,7 @@ class Context:
     device_trust: float
     request_id: str
 
+
 @dataclass(frozen=True)
 class Resource:
     type: str
@@ -27,6 +30,7 @@ class Resource:
     tenant_id: str
     labels: list[str]
     fields: dict[str, dict[str, Any]]  # field -> {classification, crypto?}
+
 
 @dataclass(frozen=True)
 class PolicyInput:

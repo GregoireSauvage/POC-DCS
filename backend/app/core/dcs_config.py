@@ -7,7 +7,6 @@ from typing import Any
 
 from app.core.config import settings
 
-
 _DEFAULT_CONFIG: dict[str, Any] = {
     "pip": {
         "channel": "web",

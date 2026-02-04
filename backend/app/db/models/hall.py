@@ -1,8 +1,11 @@
-from sqlalchemy import String, DateTime, func, ForeignKeyConstraint, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
-from app.db.models.base import Base
 import uuid
+
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.models.base import Base
+
 
 class Hall(Base):
     __tablename__ = "halls"
@@ -18,4 +21,6 @@ class Hall(Base):
     owner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     current_film_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     labels: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[object] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -1,5 +1,6 @@
-from app.dcs.pip.types import PolicyInput
 from app.core.dcs_config import get_dcs_config
+from app.dcs.pip.types import PolicyInput
+
 
 def decide(policy_input: PolicyInput) -> tuple[bool, dict[str, str], str]:
     """

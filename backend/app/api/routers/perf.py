@@ -1,11 +1,13 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.core.runtime_settings import get_cache_level
 from app.core.security.auth import Principal, require_role
-from app.db.session import get_db
 from app.db.models.perf_log import PerfLog
+from app.db.session import get_db
 from app.schemas.perf import PerfOut, PerfSummaryOut
 
 router = APIRouter()
@@ -13,10 +15,10 @@ router = APIRouter()
 
 @router.get("/", response_model=list[PerfOut])
 def list_perf(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[Principal, Depends(require_role("admin"))],
     limit: int = Query(200, ge=1, le=1000),
     action: str | None = Query(None),
-    db: Session = Depends(get_db),
-    p: Principal = Depends(require_role("admin")),
 ):
     q = db.query(PerfLog).order_by(PerfLog.ts.desc())
     if action:
@@ -45,11 +47,11 @@ def list_perf(
 
 @router.get("/summary", response_model=list[PerfSummaryOut])
 def perf_summary(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[Principal, Depends(require_role("admin"))],
     action: str | None = Query(None),
     cache_level: int | None = Query(None, ge=0),
     all_cache_levels: bool = Query(False),
-    db: Session = Depends(get_db),
-    p: Principal = Depends(require_role("admin")),
 ):
     if not all_cache_levels and cache_level is None:
         cache_level = get_cache_level()

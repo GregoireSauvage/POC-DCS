@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from time import perf_counter
 from typing import Any
 
-_perf_ctx: ContextVar["PerfContext | None"] = ContextVar("perf_ctx", default=None)
+_perf_ctx: ContextVar[PerfContext | None] = ContextVar("perf_ctx", default=None)
 
 
 class PerfContext:

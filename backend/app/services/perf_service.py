@@ -1,7 +1,9 @@
-from sqlalchemy.orm import Session
 from uuid import UUID
-from app.db.models.perf_log import PerfLog
+
+from sqlalchemy.orm import Session
+
 from app.core.runtime_settings import get_cache_level
+from app.db.models.perf_log import PerfLog
 from app.observability.perf import PerfContext
 
 

@@ -1,8 +1,11 @@
-from sqlalchemy import String, DateTime, func, BigInteger, CheckConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
-from sqlalchemy.orm import Mapped, mapped_column
 import uuid
+
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, String, func
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
 from app.db.models.base import Base
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -11,7 +14,9 @@ class AuditLog(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ts: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ts: Mapped[object] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     request_id: Mapped[str] = mapped_column(String, nullable=False)
 
     tenant_id: Mapped[str] = mapped_column(String, nullable=False)

@@ -3,6 +3,7 @@ from typing import Literal
 
 FieldAction = Literal["allow", "decrypt", "mask_after_decrypt", "deny"]
 
+
 @dataclass(frozen=True)
 class Decision:
     allow: bool

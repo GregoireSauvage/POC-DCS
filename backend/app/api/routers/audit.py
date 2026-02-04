@@ -1,24 +1,35 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
-from sqlalchemy.orm import Session
+from typing import Annotated
 from uuid import UUID
 
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
 from app.core.security.auth import Principal, get_current_principal
 from app.db.models.audit_log import AuditLog
-from app.schemas.audit import AuditOut
-from app.dcs.pip.provider import build_policy_input
+from app.db.session import get_db
 from app.dcs.pdp.engine import evaluate
 from app.dcs.pep.mode import dcs_enabled
+from app.dcs.pip.provider import build_policy_input
+from app.schemas.audit import AuditOut
 from app.services.perf_service import write_perf
 
 router = APIRouter()
 
+
 @router.get("/", response_model=list[AuditOut])
-def list_audit(request: Request, db: Session = Depends(get_db), p: Principal = Depends(get_current_principal)):
+def list_audit(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    p: Annotated[Principal, Depends(get_current_principal)],
+):
     pi = build_policy_input(
-        db=db, request=request, principal=p,
-        action="audit.read", resource_type="audit",
-        resource_id="audit", owner_id=None,
+        db=db,
+        request=request,
+        principal=p,
+        action="audit.read",
+        resource_type="audit",
+        resource_id="audit",
+        owner_id=None,
         crypto_meta={},
     )
     dec = evaluate(pi)

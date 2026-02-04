@@ -37,9 +37,14 @@ def set_runtime_settings(*, dcs_mode: str | None, cache_level: int | None) -> No
             _overrides["cache_level"] = max(0, int(cache_level))
             changed = True
     if changed:
-        _log.info("runtime settings updated: dcs_mode=%s cache_level=%s", get_dcs_mode(), get_cache_level())
+        _log.info(
+            "runtime settings updated: dcs_mode=%s cache_level=%s",
+            get_dcs_mode(),
+            get_cache_level(),
+        )
         try:
             from app.cache.cache import clear_all_caches
+
             clear_all_caches()
         except Exception:
             pass
