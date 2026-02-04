@@ -50,4 +50,4 @@ def test_developer_masks_sensitive():
     """Developer role should see masked values for sensitive fields."""
     decision = evaluate(mk_input("developer"))
     assert decision.allow is True
-    assert decision.field_actions["age"] == "mask"
+    assert decision.field_actions["age"] == "mask_after_decrypt"
