@@ -1,0 +1,76 @@
+{
+  "info": {
+    "name": "Cinema DCS API",
+    "description": "API collection for Cinema DCS PoC",
+    "version": "0.1.0"
+  },
+  "baseUrl": "http://localhost:8080",
+  "auth": {
+    "type": "bearer",
+    "description": "JWT token from /api/auth/login"
+  },
+  "endpoints": [
+    {
+      "name": "Login",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "body": {
+        "username": "admin",
+        "password": "password"
+      },
+      "description": "Authenticate and receive JWT token"
+    },
+    {
+      "name": "Get Current User",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "auth": true,
+      "description": "Get current authenticated user info"
+    },
+    {
+      "name": "List Films",
+      "method": "GET",
+      "path": "/api/films",
+      "auth": true,
+      "description": "Get all films with DCS applied"
+    },
+    {
+      "name": "List Halls",
+      "method": "GET",
+      "path": "/api/halls",
+      "auth": true,
+      "description": "Get all halls with DCS applied"
+    },
+    {
+      "name": "List Spectators",
+      "method": "GET",
+      "path": "/api/spectators",
+      "auth": true,
+      "description": "Get all spectators with DCS applied"
+    },
+    {
+      "name": "Get Audit Logs",
+      "method": "GET",
+      "path": "/api/audit",
+      "auth": true,
+      "description": "Get audit logs (admin only)"
+    },
+    {
+      "name": "Get Performance Stats",
+      "method": "GET",
+      "path": "/api/perf/stats",
+      "auth": true,
+      "description": "Get performance statistics"
+    },
+    {
+      "name": "Toggle DCS Mode",
+      "method": "POST",
+      "path": "/api/admin/dcs-mode",
+      "auth": true,
+      "body": {
+        "enabled": true
+      },
+      "description": "Enable or disable DCS enforcement (admin only)"
+    }
+  ]
+}

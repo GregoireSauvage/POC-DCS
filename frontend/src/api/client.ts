@@ -30,7 +30,9 @@ export async function apiFetch<T>(
       try {
         localStorage.removeItem(STORAGE_KEY);
         window.dispatchEvent(new Event("auth:logout"));
-      } catch {}
+      } catch {
+        // Ignore storage errors in restricted contexts
+      }
     }
     throw new ApiError(res.status, body);
   }
