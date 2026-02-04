@@ -22,6 +22,7 @@ lint-fix:
 # Run all tests
 test:
 	cd backend && uv run pytest
+	cd backend-go && go test ./...
 	cd frontend && npm test
 
 # Run tests with coverage

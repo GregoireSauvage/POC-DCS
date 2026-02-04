@@ -41,6 +41,25 @@ jobs:
           flags: backend
         continue-on-error: true
 
+  backend-go:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend-go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Run tests
+        run: go test ./...
+
   frontend:
     name: Frontend (TypeScript)
     runs-on: ubuntu-latest
