@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package dcs.v1;
+
+import "common/v1/context.proto";
+
+option go_package = "github.com/neoweyss/poc-dcs/backend-go/gen/go/dcs/v1;dcsv1";
+
+enum Classification {
+  CLASSIFICATION_UNSPECIFIED = 0;
+  CLASSIFICATION_PUBLIC = 1;
+  CLASSIFICATION_INTERNAL = 2;
+  CLASSIFICATION_SENSITIVE = 3;
+  CLASSIFICATION_PII = 4;
+}
+
+enum FieldAction {
+  FIELD_ACTION_UNSPECIFIED = 0;
+  FIELD_ACTION_ALLOW = 1;
+  FIELD_ACTION_DECRYPT = 2;
+  FIELD_ACTION_MASK_AFTER_DECRYPT = 3;
+  FIELD_ACTION_DENY = 4;
+}
+
+message FieldMeta {
+  Classification classification = 1;
+  map<string, string> crypto = 2;
+}
+
+message Resource {
+  string type = 1;
+  string id = 2;
+  string tenant_id = 3;
+  string owner_id = 4;
+  repeated string labels = 5;
+  map<string, FieldMeta> fields = 6;
+}
+
+message PolicyInput {
+  common.v1.Principal principal = 1;
+  string action = 2;
+  Resource resource = 3;
+  common.v1.RequestContext context = 4;
+}
+
+message Decision {
+  bool allow = 1;
+  map<string, FieldAction> field_actions = 2;
+  string reason = 3;
+}
+
+message EvaluatePolicyRequest {
+  PolicyInput input = 1;
+  common.v1.RuntimeSettings runtime = 2;
+}
+
+message EvaluatePolicyResponse {
+  Decision decision = 1;
+  string decision_hash = 2;
+  bool cache_hit = 3;
+}
+
+service PolicyService {
+  rpc EvaluatePolicy(EvaluatePolicyRequest) returns (EvaluatePolicyResponse);
+}

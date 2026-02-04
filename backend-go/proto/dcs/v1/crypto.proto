@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package dcs.v1;
+
+import "common/v1/context.proto";
+
+option go_package = "github.com/neoweyss/poc-dcs/backend-go/gen/go/dcs/v1;dcsv1";
+
+message EncryptRequest {
+  string key_name = 1;
+  string plaintext = 2;
+  common.v1.RequestContext context = 3;
+}
+
+message EncryptResponse {
+  string ciphertext = 1;
+}
+
+message DecryptRequest {
+  string key_name = 1;
+  string ciphertext = 2;
+  common.v1.RequestContext context = 3;
+}
+
+message DecryptResponse {
+  string plaintext = 1;
+  bool cache_hit = 2;
+}
+
+message ComputeLookupRequest {
+  string normalized_value = 1;
+  common.v1.RequestContext context = 2;
+}
+
+message ComputeLookupResponse {
+  bytes lookup = 1;
+  bool cache_hit = 2;
+}
+
+service CryptoService {
+  rpc Encrypt(EncryptRequest) returns (EncryptResponse);
+  rpc Decrypt(DecryptRequest) returns (DecryptResponse);
+  rpc ComputeLookup(ComputeLookupRequest) returns (ComputeLookupResponse);
+}

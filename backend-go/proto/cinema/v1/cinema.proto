@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package cinema.v1;
+
+import "common/v1/context.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/neoweyss/poc-dcs/backend-go/gen/go/cinema/v1;cinemav1";
+
+message Film {
+  string id = 1;
+  string title = 2;
+  oneof time_elapsed {
+    int64 time_elapsed_int = 3;
+    string time_elapsed_text = 4;
+  }
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message Hall {
+  string id = 1;
+  string name = 2;
+  string current_film_id = 3;
+  string owner_user_id = 4;
+  int32 spectator_count = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message Spectator {
+  string id = 1;
+  string hall_id = 2;
+  string name = 3;
+  oneof age {
+    int32 age_int = 4;
+    string age_text = 5;
+  }
+  string external_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListFilmsRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+}
+
+message ListFilmsResponse {
+  repeated Film films = 1;
+}
+
+message CreateFilmRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+  string title = 3;
+  int32 time_elapsed = 4;
+}
+
+message CreateFilmResponse {
+  Film film = 1;
+}
+
+message UpdateFilmTimeRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+  string film_id = 3;
+  int32 time_elapsed = 4;
+}
+
+message UpdateFilmTimeResponse {
+  Film film = 1;
+}
+
+message ListHallsRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+}
+
+message ListHallsResponse {
+  repeated Hall halls = 1;
+}
+
+message CreateHallRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+  string name = 3;
+  string current_film_id = 4;
+  string owner_user_id = 5;
+}
+
+message CreateHallResponse {
+  Hall hall = 1;
+}
+
+message CreateSpectatorRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+  string hall_id = 3;
+  string name = 4;
+  int32 age = 5;
+  string external_id = 6;
+}
+
+message CreateSpectatorResponse {
+  Spectator spectator = 1;
+}
+
+message SearchSpectatorsRequest {
+  common.v1.Principal principal = 1;
+  common.v1.RequestContext context = 2;
+  string external_id = 3;
+}
+
+message SearchSpectatorsResponse {
+  repeated Spectator spectators = 1;
+}
+
+service CinemaService {
+  rpc ListFilms(ListFilmsRequest) returns (ListFilmsResponse);
+  rpc CreateFilm(CreateFilmRequest) returns (CreateFilmResponse);
+  rpc UpdateFilmTime(UpdateFilmTimeRequest) returns (UpdateFilmTimeResponse);
+
+  rpc ListHalls(ListHallsRequest) returns (ListHallsResponse);
+  rpc CreateHall(CreateHallRequest) returns (CreateHallResponse);
+
+  rpc CreateSpectator(CreateSpectatorRequest) returns (CreateSpectatorResponse);
+  rpc SearchSpectators(SearchSpectatorsRequest) returns (SearchSpectatorsResponse);
+}

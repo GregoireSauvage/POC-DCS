@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/neoweyss/poc-dcs/backend-go/gen/go/common/v1;commonv1";
+
+message Principal {
+  string tenant_id = 1;
+  string user_id = 2;
+  string username = 3;
+  string role = 4;
+  repeated string scopes = 5;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string client_ip = 2;
+  string channel = 3;
+  string purpose = 4;
+  double device_trust = 5;
+  string env = 6;
+}
+
+message RuntimeSettings {
+  string dcs_mode = 1;
+  int32 cache_level = 2;
+}

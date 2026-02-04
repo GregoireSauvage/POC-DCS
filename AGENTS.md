@@ -52,7 +52,7 @@ Browser → Nginx (PEP entry) → FastAPI Backend → PostgreSQL
                               Vault (KMS)
 ```
 
-**Backend structure** (`/backend/app/`):
+**Backend Python structure** (`/backend/app/`):
 - `api/routers/` - HTTP endpoints: auth, films, halls, spectators, audit, perf, admin
 - `dcs/` - Data-Centric Security core:
   - `pep/` - Policy Enforcement Point (applies decisions to data)
@@ -73,6 +73,10 @@ Browser → Nginx (PEP entry) → FastAPI Backend → PostgreSQL
 - `types/` - TypeScript type definitions
 
 ## Code Conventions
+
+### Golang Backend
+@SKILL-go-development.md
+@SKILL-grpc.md
 
 ### Python Backend
 - **Style**: Follow PEP 8, enforced by `ruff`
@@ -195,7 +199,7 @@ useEffect(() => {
 
 ## Error Handling
 
-### Backend
+### Backend Python
 - **Validation errors**: Return `422` with Pydantic validation details
 - **Auth errors**: Return `401` (unauthorized) or `403` (forbidden)
 - **Not found**: Return `404` with resource type in message
@@ -225,6 +229,9 @@ pytest tests/unit/             # Unit tests only
 pytest tests/integration/      # Integration tests
 pytest --cov=app --cov-report=html  # Coverage report
 ```
+
+## Methodology : TDD
+**Test Driven Development** is the key for quality code with precise key results.
 
 **Coverage requirements**: >80% for core DCS modules (PDP, PEP, KMS)
 
