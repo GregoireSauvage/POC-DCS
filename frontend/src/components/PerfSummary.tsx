@@ -12,6 +12,21 @@ export type PerfSummaryMap = Record<
   }
 >;
 
+export type PerfSummaryGrid = Record<
+  string,
+  Record<
+    number,
+    {
+      on: number | null;
+      off: number | null;
+      onCount: number;
+      offCount: number;
+    }
+  >
+>;
+
+export const CACHE_LEVELS = [0, 1, 2, 3];
+
 export function buildPerfSummary(rows: PerfSummaryOut[]): PerfSummaryMap {
   const map: PerfSummaryMap = {};
   for (const row of rows) {
@@ -33,6 +48,25 @@ export function buildPerfSummary(rows: PerfSummaryOut[]): PerfSummaryMap {
     }
   }
   return map;
+}
+
+export function buildPerfSummaryGrid(rows: PerfSummaryOut[]): PerfSummaryGrid {
+  const grid: PerfSummaryGrid = {};
+  for (const row of rows) {
+    const action = row.action;
+    if (!grid[action]) grid[action] = {};
+    if (!grid[action][row.cache_level]) {
+      grid[action][row.cache_level] = { on: null, off: null, onCount: 0, offCount: 0 };
+    }
+    if (row.dcs_enabled) {
+      grid[action][row.cache_level].on = row.avg_total_ms;
+      grid[action][row.cache_level].onCount = row.count;
+    } else {
+      grid[action][row.cache_level].off = row.avg_total_ms;
+      grid[action][row.cache_level].offCount = row.count;
+    }
+  }
+  return grid;
 }
 
 export function PerfSummaryBadge({
@@ -62,6 +96,43 @@ export function PerfSummaryBadge({
           <strong>{item.cacheLevel === "mixed" ? "mixed" : `L${item.cacheLevel}`}</strong>
         </span>
       ) : null}
+    </div>
+  );
+}
+
+export function PerfSummaryMatrix({
+  grid,
+  action,
+  levels = CACHE_LEVELS,
+}: {
+  grid: PerfSummaryGrid | null;
+  action: string;
+  levels?: number[];
+}) {
+  const rows = grid?.[action] ?? {};
+  return (
+    <div className="tablewrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Cache</th>
+            <th>DCS on avg</th>
+            <th>DCS off avg</th>
+          </tr>
+        </thead>
+        <tbody>
+          {levels.map((level) => {
+            const cell = rows[level];
+            return (
+              <tr key={level}>
+                <td className="mono muted">L{level}</td>
+                <td>{fmt(cell?.on ?? null)}</td>
+                <td>{fmt(cell?.off ?? null)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

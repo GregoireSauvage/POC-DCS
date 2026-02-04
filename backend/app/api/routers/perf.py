@@ -47,10 +47,11 @@ def list_perf(
 def perf_summary(
     action: str | None = Query(None),
     cache_level: int | None = Query(None, ge=0),
+    all_cache_levels: bool = Query(False),
     db: Session = Depends(get_db),
     p: Principal = Depends(require_role("admin")),
 ):
-    if cache_level is None:
+    if not all_cache_levels and cache_level is None:
         cache_level = get_cache_level()
     q = (
         db.query(
@@ -65,7 +66,7 @@ def perf_summary(
     )
     if action:
         q = q.filter(PerfLog.action == action)
-    if cache_level is not None:
+    if cache_level is not None and not all_cache_levels:
         q = q.filter(PerfLog.cache_level == cache_level)
     rows = q.all()
     return [

@@ -5,7 +5,15 @@ import { ApiError } from "../api/client";
 import { getAdminSettings, updateAdminSettings } from "../api/admin";
 import { createFilm, listFilms, updateFilmTime } from "../api/cinema";
 import { listPerfSummary } from "../api/perf";
-import { PerfSummaryBadge, buildPerfSummary, type PerfSummaryMap } from "../components/PerfSummary";
+import {
+  CACHE_LEVELS,
+  PerfSummaryBadge,
+  PerfSummaryMatrix,
+  buildPerfSummary,
+  buildPerfSummaryGrid,
+  type PerfSummaryGrid,
+  type PerfSummaryMap,
+} from "../components/PerfSummary";
 import { Alert, Button, Card, Mono, Pill, SkeletonRow } from "../components/ui";
 
 export default function Films() {
@@ -16,6 +24,7 @@ export default function Films() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [perfSummary, setPerfSummary] = useState<PerfSummaryMap | null>(null);
+  const [perfSummaryGrid, setPerfSummaryGrid] = useState<PerfSummaryGrid | null>(null);
   const [adminSettings, setAdminSettings] = useState<AdminSettingsOut | null>(null);
   const [pendingSettings, setPendingSettings] = useState<AdminSettingsOut | null>(null);
 
@@ -33,7 +42,16 @@ export default function Films() {
   const [testCount, setTestCount] = useState(0);
   const [testErrors, setTestErrors] = useState(0);
   const runningRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [suiteRunning, setSuiteRunning] = useState(false);
+  const [suiteStatus, setSuiteStatus] = useState<string | null>(null);
+  const [suiteIndex, setSuiteIndex] = useState(0);
+  const [suiteTotal, setSuiteTotal] = useState(0);
+  const [suiteCount, setSuiteCount] = useState(0);
+  const [suiteErrors, setSuiteErrors] = useState(0);
+  const [suiteDcsOn, setSuiteDcsOn] = useState(true);
+  const [suiteDcsOff, setSuiteDcsOff] = useState(true);
+  const [suiteLevels, setSuiteLevels] = useState<boolean[]>(CACHE_LEVELS.map(() => true));
+  const suiteCancelRef = useRef(false);
 
   async function refresh() {
     setError(null);
@@ -47,7 +65,8 @@ export default function Films() {
     } finally {
       setLoading(false);
     }
-    await refreshPerf();
+    await refreshPerfCurrent();
+    await refreshPerfAll();
   }
 
   async function refreshSettings() {
@@ -56,14 +75,15 @@ export default function Films() {
       const data = await getAdminSettings(token);
       setAdminSettings(data);
       setPendingSettings(data);
-      await refreshPerf(data.cache_level);
+      await refreshPerfCurrent(data.cache_level);
+      await refreshPerfAll();
     } catch {
       setAdminSettings(null);
       setPendingSettings(null);
     }
   }
 
-  async function refreshPerf(cacheLevelOverride?: number) {
+  async function refreshPerfCurrent(cacheLevelOverride?: number) {
     if (auth.role !== "admin") return;
     try {
       const cacheLevel = typeof cacheLevelOverride === "number" ? cacheLevelOverride : adminSettings?.cache_level;
@@ -77,8 +97,18 @@ export default function Films() {
     }
   }
 
-  useEffect(() => { refresh(); refreshSettings(); refreshPerf(); }, [auth.role, token]);
-  useEffect(() => () => { runningRef.current = false; if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  async function refreshPerfAll() {
+    if (auth.role !== "admin") return;
+    try {
+      const rows = await listPerfSummary(token, { all_cache_levels: true });
+      setPerfSummaryGrid(buildPerfSummaryGrid(rows));
+    } catch {
+      setPerfSummaryGrid(null);
+    }
+  }
+
+  useEffect(() => { refresh(); refreshSettings(); }, [auth.role, token]);
+  useEffect(() => () => { runningRef.current = false; suiteCancelRef.current = true; }, []);
 
   async function onCreate() {
     setError(null);
@@ -86,7 +116,6 @@ export default function Films() {
     try {
       await createFilm(token, { title, time_elapsed: timeElapsed });
       await refresh();
-      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -101,7 +130,6 @@ export default function Films() {
     try {
       await updateFilmTime(token, editFilmId, editTime);
       await refresh();
-      await refreshPerf();
     } catch (e) {
       setError(toMsg(e));
     } finally {
@@ -116,14 +144,71 @@ export default function Films() {
       const updated = await updateAdminSettings(token, pendingSettings);
       setAdminSettings(updated);
       setPendingSettings(updated);
-      await refreshPerf(updated.cache_level);
+      await refreshPerfCurrent(updated.cache_level);
+      await refreshPerfAll();
     } catch (e) {
       setError(toMsg(e));
     }
   }
 
-  function startLoadTest() {
-    if (runningRef.current) return;
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  async function runLoadTestOnce({
+    mode,
+    rps,
+    durationSec,
+    stepSec,
+    filmId,
+    shouldStop,
+    onSuccess,
+    onError,
+  }: {
+    mode: "read" | "update_time";
+    rps: number;
+    durationSec: number;
+    stepSec: number;
+    filmId?: string;
+    shouldStop: () => boolean;
+    onSuccess?: () => void;
+    onError?: () => void;
+  }) {
+    if (rps <= 0 || durationSec <= 0) return;
+    const intervalMs = Math.max(1, Math.floor(1000 / rps));
+    const endAt = Date.now() + durationSec * 1000;
+    let nextTime = Date.now();
+    let localTime = editTime;
+
+    while (!shouldStop() && Date.now() < endAt) {
+      nextTime += intervalMs;
+      try {
+        if (mode === "read") {
+          await listFilms(token);
+        } else {
+          if (!filmId) throw new Error("Missing film id");
+          localTime += stepSec;
+          await updateFilmTime(token, filmId, localTime);
+        }
+        onSuccess?.();
+      } catch {
+        onError?.();
+      }
+      const delay = nextTime - Date.now();
+      if (delay > 0) await sleep(delay);
+    }
+  }
+
+  function buildSuiteScenarios() {
+    const levels = CACHE_LEVELS.filter((level) => suiteLevels[level]);
+    const modes: Array<"on" | "off"> = [];
+    if (suiteDcsOn) modes.push("on");
+    if (suiteDcsOff) modes.push("off");
+    return modes.flatMap((mode) =>
+      levels.map((level) => ({ dcs_mode: mode, cache_level: level }))
+    );
+  }
+
+  async function startLoadTest() {
+    if (runningRef.current || suiteRunning) return;
     if (testRps <= 0 || testDuration <= 0) return;
     if (testMode === "update_time" && !editFilmId) return;
 
@@ -132,44 +217,88 @@ export default function Films() {
     setTestCount(0);
     setTestErrors(0);
 
-    const intervalMs = Math.max(1, Math.floor(1000 / testRps));
-    const totalDurationMs = testDuration * 1000;
-    const start = Date.now();
-    let nextTime = start;
-    let localTime = editTime;
+    await runLoadTestOnce({
+      mode: testMode,
+      rps: testRps,
+      durationSec: testDuration,
+      stepSec: testStep,
+      filmId: editFilmId,
+      shouldStop: () => !runningRef.current,
+      onSuccess: () => setTestCount((c) => c + 1),
+      onError: () => setTestErrors((e) => e + 1),
+    });
 
-    const tick = async () => {
-      if (!runningRef.current) return;
-      if (Date.now() - start >= totalDurationMs) {
-        runningRef.current = false;
-        setRunning(false);
-        await refresh();
-        await refreshPerf();
-        return;
-      }
-      nextTime += intervalMs;
-      try {
-        if (testMode === "read") {
-          await listFilms(token);
-        } else {
-          localTime += testStep;
-          await updateFilmTime(token, editFilmId, localTime);
-        }
-        setTestCount((c) => c + 1);
-      } catch {
-        setTestErrors((e) => e + 1);
-      }
-      const delay = Math.max(0, nextTime - Date.now());
-      timerRef.current = setTimeout(tick, delay);
-    };
-
-    timerRef.current = setTimeout(tick, intervalMs);
+    runningRef.current = false;
+    setRunning(false);
+    await refresh();
   }
 
   function stopLoadTest() {
     runningRef.current = false;
     setRunning(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
+  }
+
+  async function startProfilingSuite() {
+    if (suiteRunning || runningRef.current) return;
+    if (auth.role !== "admin") return;
+    if (testRps <= 0 || testDuration <= 0) {
+      setError("Set a positive req/s and duration before running the suite.");
+      return;
+    }
+    if (testMode === "update_time" && !editFilmId) {
+      setError("Select a film before running update_time tests.");
+      return;
+    }
+    const scenarios = buildSuiteScenarios();
+    if (!scenarios.length) {
+      setSuiteStatus("Select at least one scenario.");
+      return;
+    }
+
+    suiteCancelRef.current = false;
+    setSuiteRunning(true);
+    setSuiteStatus("Starting...");
+    setSuiteIndex(0);
+    setSuiteTotal(scenarios.length);
+    setSuiteCount(0);
+    setSuiteErrors(0);
+
+    for (let i = 0; i < scenarios.length; i += 1) {
+      if (suiteCancelRef.current) break;
+      const scenario = scenarios[i];
+      setSuiteIndex(i + 1);
+      setSuiteStatus(`DCS ${scenario.dcs_mode} / L${scenario.cache_level}`);
+      try {
+        const updated = await updateAdminSettings(token, scenario);
+        setAdminSettings(updated);
+        setPendingSettings(updated);
+      } catch (e) {
+        setSuiteErrors((c) => c + 1);
+        setError(toMsg(e));
+        break;
+      }
+
+      await runLoadTestOnce({
+        mode: testMode,
+        rps: testRps,
+        durationSec: testDuration,
+        stepSec: testStep,
+        filmId: editFilmId,
+        shouldStop: () => suiteCancelRef.current,
+        onSuccess: () => setSuiteCount((c) => c + 1),
+        onError: () => setSuiteErrors((e) => e + 1),
+      });
+    }
+
+    setSuiteRunning(false);
+    setSuiteStatus(suiteCancelRef.current ? "Stopped" : "Done");
+    suiteCancelRef.current = false;
+    await refresh();
+  }
+
+  function stopProfilingSuite() {
+    suiteCancelRef.current = true;
+    setSuiteStatus("Stopping...");
   }
 
   return (
@@ -262,7 +391,7 @@ export default function Films() {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-                  <Button variant="primary" disabled={!pendingSettings} onClick={applySettings}>Apply</Button>
+                  <Button variant="primary" disabled={!pendingSettings || suiteRunning} onClick={applySettings}>Apply</Button>
                   <Button variant="ghost" onClick={refreshSettings}>Refresh</Button>
                 </div>
               </>
@@ -292,7 +421,11 @@ export default function Films() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-              <Button variant="primary" disabled={running || (testMode === "update_time" && !editFilmId)} onClick={startLoadTest}>
+              <Button
+                variant="primary"
+                disabled={running || suiteRunning || (testMode === "update_time" && !editFilmId)}
+                onClick={startLoadTest}
+              >
                 Start
               </Button>
               <Button variant="ghost" disabled={!running} onClick={stopLoadTest}>
@@ -309,32 +442,111 @@ export default function Films() {
             </div>
           </Card>
 
-          <Card title="Perf summary" subtitle="Avg total ms for read/write (current cache level).">
+          <Card title="Profiling suite" subtitle="Run automated scenarios across DCS/cache levels.">
             {auth.role !== "admin" ? (
               <Alert kind="error">Admin only.</Alert>
             ) : (
-              <div className="tablewrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Action</th>
-                      <th>DCS on avg</th>
-                      <th>DCS off avg</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>film.read</td>
-                      <td>{perfSummary?.["film.read"] ? `${perfSummary["film.read"].on?.toFixed(2) ?? "—"} ms` : "—"}</td>
-                      <td>{perfSummary?.["film.read"] ? `${perfSummary["film.read"].off?.toFixed(2) ?? "—"} ms` : "—"}</td>
-                    </tr>
-                    <tr>
-                      <td>film.update_time</td>
-                      <td>{perfSummary?.["film.update_time"] ? `${perfSummary["film.update_time"].on?.toFixed(2) ?? "—"} ms` : "—"}</td>
-                      <td>{perfSummary?.["film.update_time"] ? `${perfSummary["film.update_time"].off?.toFixed(2) ?? "—"} ms` : "—"}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <>
+                <div className="grid cols-2">
+                  <div className="field">
+                    <label>DCS modes</label>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={suiteDcsOn}
+                          onChange={(e) => setSuiteDcsOn(e.target.checked)}
+                          disabled={suiteRunning}
+                        />
+                        on
+                      </label>
+                      <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={suiteDcsOff}
+                          onChange={(e) => setSuiteDcsOff(e.target.checked)}
+                          disabled={suiteRunning}
+                        />
+                        off
+                      </label>
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Cache levels</label>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {CACHE_LEVELS.map((level) => (
+                        <label key={level} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={suiteLevels[level]}
+                            onChange={(e) =>
+                              setSuiteLevels((prev) => {
+                                const next = [...prev];
+                                next[level] = e.target.checked;
+                                return next;
+                              })
+                            }
+                            disabled={suiteRunning}
+                          />
+                          L{level}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <Button
+                    variant="primary"
+                    disabled={
+                      suiteRunning ||
+                      running ||
+                      (!suiteDcsOn && !suiteDcsOff) ||
+                      !suiteLevels.some(Boolean) ||
+                      (testMode === "update_time" && !editFilmId)
+                    }
+                    onClick={startProfilingSuite}
+                  >
+                    Start
+                  </Button>
+                  <Button variant="ghost" disabled={!suiteRunning} onClick={stopProfilingSuite}>
+                    Stop
+                  </Button>
+                  <span className="badge">
+                    <span className="muted">scenario</span>
+                    <strong>{suiteTotal ? `${suiteIndex}/${suiteTotal}` : "--"}</strong>
+                  </span>
+                  <span className="badge">
+                    <span className="muted">sent</span>
+                    <strong>{suiteCount}</strong>
+                  </span>
+                  <span className="badge">
+                    <span className="muted">errors</span>
+                    <strong>{suiteErrors}</strong>
+                  </span>
+                  {suiteStatus ? (
+                    <span className="badge">
+                      <span className="muted">status</span>
+                      <strong>{suiteStatus}</strong>
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </Card>
+
+          <Card title="Perf summary" subtitle="Avg total ms by DCS mode and cache level.">
+            {auth.role !== "admin" ? (
+              <Alert kind="error">Admin only.</Alert>
+            ) : (
+              <div className="grid" style={{ gap: 12 }}>
+                <div>
+                  <div className="muted" style={{ marginBottom: 6 }}>film.read</div>
+                  <PerfSummaryMatrix grid={perfSummaryGrid} action="film.read" />
+                </div>
+                <div>
+                  <div className="muted" style={{ marginBottom: 6 }}>film.update_time</div>
+                  <PerfSummaryMatrix grid={perfSummaryGrid} action="film.update_time" />
+                </div>
               </div>
             )}
           </Card>
@@ -388,3 +600,4 @@ function toMsg(e: unknown): string {
   if (e instanceof ApiError) return typeof e.body === "string" ? e.body : JSON.stringify(e.body);
   return String(e);
 }
+
