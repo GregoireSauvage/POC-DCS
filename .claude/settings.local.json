@@ -12,7 +12,13 @@
       "Bash(npm run build:*)",
       "Bash(npm test:*)",
       "Bash(wc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(go build:*)",
+      "Bash(go version:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(go get:*)"
     ]
   }
 }

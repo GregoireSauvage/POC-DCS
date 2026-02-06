@@ -21,6 +21,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -34,7 +35,7 @@ type Server struct {
 	filmFlow *service.FilmService
 }
 
-func NewServer(cfg *config.Config, logger *slog.Logger) *Server {
+func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
 	rt := runtime.New(cfg.DCSMode, cfg.CacheLevel)
 	cm := cache.NewManager(rt, cache.Options{
 		MaxEntries:        cfg.CacheMaxEntries,
@@ -44,14 +45,44 @@ func NewServer(cfg *config.Config, logger *slog.Logger) *Server {
 		PepperTTL:         cfg.CacheTTLPepper,
 	})
 
-	kmsClient := kms.NewLocalClient()
-	seedCT, err := kmsClient.Encrypt(context.Background(), "120")
-	if err != nil {
-		seedCT = "120"
+	// Create KMS client (Vault Transit if configured, otherwise local mock)
+	var kmsClient service.KMS
+	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
+		logger.Info("using Vault Transit KMS")
+		vaultClient, err := kms.NewVaultTransitClient(
+			cfg.VaultAddr,
+			cfg.VaultToken,
+			cfg.VaultTransitKey,
+			cm,
+			logger.With(slog.String("component", "vault")),
+		)
+		if err != nil {
+			logger.Error("failed to create vault client, falling back to local KMS", slog.String("error", err.Error()))
+			kmsClient = kms.NewLocalClient()
+		} else {
+			kmsClient = vaultClient
+		}
+	} else {
+		logger.Warn("no Vault config provided, using local mock KMS (NOT SECURE)")
+		kmsClient = kms.NewLocalClient()
 	}
-	repo := memory.NewFilmRepository([]service.FilmRecord{
-		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT},
-	})
+
+	// Create film repository (PostgreSQL if DB available, otherwise in-memory)
+	var filmRepo service.FilmRepository
+	if db != nil {
+		logger.Info("using PostgreSQL film repository")
+		filmRepo = postgres.NewFilmRepository(db)
+	} else {
+		logger.Warn("using in-memory film repository (for development only)")
+		seedCT, err := kmsClient.Encrypt(context.Background(), "120")
+		if err != nil {
+			seedCT = "120"
+		}
+		filmRepo = memory.NewFilmRepository([]service.FilmRecord{
+			{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT},
+		})
+	}
+
 	provider := pip.NewProvider(rt, cm, &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]types.Classification{
 			"film": {
@@ -68,7 +99,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger) *Server {
 	})
 	engine := pdp.NewEngine(rt, cm)
 	applier := pep.NewFilmApplier(rt, kmsClient)
-	filmFlow := service.NewFilmService(repo, provider, engine, applier, kmsClient)
+
+	// Create audit service if DB available
+	var auditService *service.AuditService
+	if db != nil {
+		auditRepo := postgres.NewAuditLogRepository(db)
+		auditService = service.NewAuditService(auditRepo, logger.With(slog.String("component", "audit")))
+		logger.Info("audit logging enabled")
+	} else {
+		logger.Warn("audit logging disabled (no database)")
+	}
+
+	filmFlow := service.NewFilmService(filmRepo, provider, engine, applier, kmsClient, auditService)
 
 	mux := nethttp.NewServeMux()
 

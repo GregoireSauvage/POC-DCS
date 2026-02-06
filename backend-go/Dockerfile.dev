@@ -1,0 +1,17 @@
+# Dev Dockerfile for Go backend with hot reload
+FROM golang:1.22-alpine AS dev
+
+WORKDIR /app
+
+# Install dev tools
+RUN go install github.com/cosmtrek/air@latest
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Use air for hot reload in dev
+CMD ["air", "-c", ".air.toml"]

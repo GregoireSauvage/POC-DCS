@@ -2,8 +2,17 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+)
+
+// Common repository errors
+var (
+	ErrNotFound       = errors.New("resource not found")
+	ErrAlreadyExists  = errors.New("resource already exists")
+	ErrInvalidInput   = errors.New("invalid input")
+	ErrForbidden      = errors.New("forbidden")
 )
 
 type CinemaRepository interface {

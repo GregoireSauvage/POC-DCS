@@ -47,15 +47,17 @@ type FilmService struct {
 	pdp       *pdp.Engine
 	applier   *pep.FilmApplier
 	encryptor KMS
+	audit     *AuditService
 }
 
-func NewFilmService(repo FilmRepository, provider *pip.Provider, engine *pdp.Engine, applier *pep.FilmApplier, kms KMS) *FilmService {
+func NewFilmService(repo FilmRepository, provider *pip.Provider, engine *pdp.Engine, applier *pep.FilmApplier, kms KMS, audit *AuditService) *FilmService {
 	return &FilmService{
 		repo:      repo,
 		pip:       provider,
 		pdp:       engine,
 		applier:   applier,
 		encryptor: kms,
+		audit:     audit,
 	}
 }
 
