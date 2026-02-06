@@ -18,7 +18,9 @@
       "Bash(go mod tidy:*)",
       "Bash(docker:*)",
       "Bash(docker-compose:*)",
-      "Bash(go get:*)"
+      "Bash(go get:*)",
+      "Bash(go test:*)",
+      "Bash(go tool cover:*)"
     ]
   }
 }

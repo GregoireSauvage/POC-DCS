@@ -24,7 +24,7 @@ func newTestServer(t *testing.T) *Server {
 		CacheLevel:      1,
 		CacheMaxEntries: 100,
 	}
-	return NewServer(cfg, slog.Default())
+	return NewServer(cfg, slog.Default(), nil) // nil DB for test
 }
 
 func TestServer_AdminSettingsRoundTrip(t *testing.T) {

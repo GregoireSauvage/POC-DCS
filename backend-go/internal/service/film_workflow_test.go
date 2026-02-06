@@ -90,7 +90,7 @@ func buildFilmServiceForTest(rt *runtime.Settings, repo FilmRepository, kms KMS)
 	})
 	engine := pdp.NewEngine(rt, cm)
 	applier := pep.NewFilmApplier(rt, kms)
-	return NewFilmService(repo, provider, engine, applier, kms)
+	return NewFilmService(repo, provider, engine, applier, kms, nil) // audit service not needed for tests
 }
 
 func TestFilmService_List_DeveloperGetsMaskedValue(t *testing.T) {
