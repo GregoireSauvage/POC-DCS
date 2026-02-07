@@ -21,6 +21,31 @@ func TestSettings_DcsMode(t *testing.T) {
 	}
 }
 
+func TestSettings_DcsModeDefaultsToOn(t *testing.T) {
+	rt := New("", 1)
+	if !rt.DcsEnabled() {
+		t.Fatalf("expected DCS enabled when mode is empty")
+	}
+
+	blank := "   "
+	rt.Set(&blank, nil)
+	if !rt.DcsEnabled() {
+		t.Fatalf("expected DCS enabled when mode is blank")
+	}
+
+	falseStr := "false"
+	rt.Set(&falseStr, nil)
+	if rt.DcsEnabled() {
+		t.Fatalf("expected DCS disabled when mode is false")
+	}
+
+	noStr := "no"
+	rt.Set(&noStr, nil)
+	if rt.DcsEnabled() {
+		t.Fatalf("expected DCS disabled when mode is no")
+	}
+}
+
 func TestSettings_CacheLevel(t *testing.T) {
 	rt := New("on", 1)
 	if rt.CacheLevel() != 1 {

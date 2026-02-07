@@ -187,3 +187,34 @@ func (v *VaultTransitClient) GetPepper(ctx context.Context, path string) ([]byte
 
 	return pepper, nil
 }
+
+// ComputeLookup computes HMAC lookup for searchable encryption.
+// Retrieves pepper from Vault (with caching at level 1), normalizes the value,
+// and returns HMAC-SHA256 digest for database lookup queries.
+//
+// This enables case-insensitive and whitespace-insensitive searches on encrypted
+// external_id fields by storing the HMAC digest in the external_id_lookup column.
+//
+// Example:
+//
+//	lookup, err := client.ComputeLookup(ctx, "  ABC-123  ", "dcs")
+//	// Returns 32-byte digest for normalized "ABC-123"
+func (v *VaultTransitClient) ComputeLookup(ctx context.Context, externalID string, pepperPath string) ([]byte, error) {
+	// Get pepper (uses cache at level 1)
+	pepper, err := v.GetPepper(ctx, pepperPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pepper for lookup: %w", err)
+	}
+
+	// Normalize and compute lookup
+	normalized := NormalizeExternalID(externalID)
+	lookup := ComputeHMACLookup(pepper, normalized)
+
+	v.logger.Debug("computed HMAC lookup",
+		slog.Int("external_id_len", len(externalID)),
+		slog.String("normalized", normalized),
+		slog.Int("lookup_len", len(lookup)),
+	)
+
+	return lookup, nil
+}

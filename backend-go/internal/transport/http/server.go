@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
@@ -26,13 +27,15 @@ import (
 )
 
 type Server struct {
-	cfg      *config.Config
-	logger   *slog.Logger
-	server   *nethttp.Server
-	mux      *nethttp.ServeMux
-	runtime  *runtime.Settings
-	cache    *cache.Manager
-	filmFlow *service.FilmService
+	cfg         *config.Config
+	logger      *slog.Logger
+	server      *nethttp.Server
+	mux         *nethttp.ServeMux
+	runtime     *runtime.Settings
+	cache       *cache.Manager
+	filmFlow    *service.FilmService
+	authService *service.AuthService
+	jwtService  *auth.JWTService
 }
 
 func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
@@ -112,15 +115,30 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 
 	filmFlow := service.NewFilmService(filmRepo, provider, engine, applier, kmsClient, auditService)
 
+	// Create JWT service
+	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
+
+	// Create auth service if DB available
+	var authSvc *service.AuthService
+	if db != nil {
+		userRepo := postgres.NewUserRepository(db)
+		authSvc = service.NewAuthService(userRepo, jwtSvc)
+		logger.Info("authentication service enabled")
+	} else {
+		logger.Warn("authentication service disabled (no database)")
+	}
+
 	mux := nethttp.NewServeMux()
 
 	s := &Server{
-		cfg:      cfg,
-		logger:   logger,
-		mux:      mux,
-		runtime:  rt,
-		cache:    cm,
-		filmFlow: filmFlow,
+		cfg:         cfg,
+		logger:      logger,
+		mux:         mux,
+		runtime:     rt,
+		cache:       cm,
+		filmFlow:    filmFlow,
+		authService: authSvc,
+		jwtService:  jwtSvc,
 		server: &nethttp.Server{
 			Addr:              cfg.HTTPAddr,
 			Handler:           mux,
@@ -143,14 +161,61 @@ func (s *Server) registerRoutes() {
 		writeJSON(w, nethttp.StatusOK, map[string]interface{}{"ready": true})
 	})
 
-	s.mux.HandleFunc("/admin/settings", s.handleAdminSettings)
-	s.mux.HandleFunc("/films", s.handleFilms)
-	s.mux.HandleFunc("/films/", s.handleFilmSubroutes)
+	// Auth routes (no JWT required)
+	s.mux.HandleFunc("/auth/login", s.handleLogin)
+
+	// Protected routes (optional JWT - fallback to X-headers for dev)
+	s.mux.Handle("/admin/settings", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleAdminSettings)))
+	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
+	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
 }
 
 type adminSettingsUpdate struct {
 	DCSMode    *string `json:"dcs_mode"`
 	CacheLevel *int    `json:"cache_level"`
+}
+
+func (s *Server) handleLogin(w nethttp.ResponseWriter, r *nethttp.Request) {
+	if r.Method != nethttp.MethodPost {
+		w.WriteHeader(nethttp.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if auth service is available
+	if s.authService == nil {
+		writeError(w, nethttp.StatusServiceUnavailable, "authentication service unavailable")
+		return
+	}
+
+	var req service.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, nethttp.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	// Validate required fields
+	if strings.TrimSpace(req.Username) == "" {
+		writeError(w, nethttp.StatusBadRequest, "username is required")
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		writeError(w, nethttp.StatusBadRequest, "password is required")
+		return
+	}
+
+	// Attempt login
+	resp, err := s.authService.Login(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			writeError(w, nethttp.StatusUnauthorized, "invalid credentials")
+		} else {
+			s.logger.Error("login failed", slog.String("error", err.Error()), slog.String("username", req.Username))
+			writeError(w, nethttp.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	writeJSON(w, nethttp.StatusOK, resp)
 }
 
 func (s *Server) handleAdminSettings(w nethttp.ResponseWriter, r *nethttp.Request) {
@@ -244,13 +309,99 @@ func (s *Server) handleFilmSubroutes(w nethttp.ResponseWriter, r *nethttp.Reques
 	writeJSON(w, nethttp.StatusOK, film)
 }
 
+// jwtMiddleware validates JWT token and rejects requests without valid token
+func (s *Server) jwtMiddleware(next nethttp.Handler) nethttp.Handler {
+	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		// Extract token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeError(w, nethttp.StatusUnauthorized, "missing authorization header")
+			return
+		}
+
+		// Parse "Bearer <token>"
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			writeError(w, nethttp.StatusUnauthorized, "invalid authorization header format")
+			return
+		}
+
+		tokenString := parts[1]
+
+		// Validate token
+		claims, err := s.jwtService.ValidateToken(tokenString)
+		if err != nil {
+			s.logger.Debug("jwt validation failed", slog.String("error", err.Error()))
+			writeError(w, nethttp.StatusUnauthorized, "invalid or expired token")
+			return
+		}
+
+		// Store claims in context
+		ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// optionalJWTMiddleware tries to extract JWT but falls back to X-headers if not present (backward compatibility)
+func (s *Server) optionalJWTMiddleware(next nethttp.Handler) nethttp.Handler {
+	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		// Try to extract JWT token
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+				// Validate token
+				claims, err := s.jwtService.ValidateToken(parts[1])
+				if err == nil {
+					// Valid JWT - store in context
+					ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				// Invalid JWT - return 401
+				s.logger.Debug("jwt validation failed", slog.String("error", err.Error()))
+				writeError(w, nethttp.StatusUnauthorized, "invalid or expired token")
+				return
+			}
+		}
+
+		// No JWT or invalid format - fallback to X-headers for dev/testing
+		next.ServeHTTP(w, r)
+	})
+}
+
+type contextKey string
+
+const jwtClaimsKey contextKey = "jwt_claims"
+
 func principalFromRequest(r *nethttp.Request) types.Principal {
+	// Try to get JWT claims from context first
+	if claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims); ok {
+		return types.Principal{
+			TenantID: claims.TenantID,
+			UserID:   claims.UserID,
+			Username: claims.Username,
+			Role:     claims.Role,
+			Scopes:   parseScopes(claims.Scopes),
+		}
+	}
+
+	// Fallback to X-headers (for dev/testing without JWT)
 	return types.Principal{
 		TenantID: readHeaderOrDefault(r, "X-Tenant-ID", "t1"),
 		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
 		Username: readHeaderOrDefault(r, "X-Username", "dev"),
 		Role:     readHeaderOrDefault(r, "X-Role", "developer"),
 	}
+}
+
+func parseScopes(scopesStr string) []string {
+	if scopesStr == "" {
+		return nil
+	}
+	// For now, return as single-element array
+	// In future, could split by space: strings.Fields(scopesStr)
+	return []string{scopesStr}
 }
 
 func requestContextFromRequest(r *nethttp.Request, env string) types.RequestContext {

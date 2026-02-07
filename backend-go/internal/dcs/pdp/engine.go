@@ -51,8 +51,37 @@ func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
 	return decision, false
 }
 
+// DecisionHash computes a deterministic SHA256 hash of a decision.
+// Field actions are sorted by key to ensure the same decision always produces the same hash,
+// matching Python's json.dumps(sort_keys=True) behavior.
+//
+// NOTE: Uses compact JSON format (no spaces) for better performance.
+// This differs from Python's default json.dumps() which adds spaces after : and ,
+// If strict parity with existing Python audit logs is required, use MarshalIndent with custom separator.
 func DecisionHash(decision types.Decision) string {
-	raw, _ := json.Marshal(decision)
+	// Sort field_actions keys to ensure deterministic output
+	fieldKeys := make([]string, 0, len(decision.FieldActions))
+	for k := range decision.FieldActions {
+		fieldKeys = append(fieldKeys, k)
+	}
+	sort.Strings(fieldKeys)
+
+	// Build sorted map to guarantee consistent JSON marshaling
+	sortedActions := make(map[string]types.FieldAction, len(decision.FieldActions))
+	for _, k := range fieldKeys {
+		sortedActions[k] = decision.FieldActions[k]
+	}
+
+	// Create payload matching Python's structure
+	payload := map[string]interface{}{
+		"allow":         decision.Allow,
+		"field_actions": sortedActions,
+		"reason":        decision.Reason,
+	}
+
+	// Use compact JSON format (matches Go's default json.Marshal)
+	// This is more efficient than Python's default which adds spaces
+	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
