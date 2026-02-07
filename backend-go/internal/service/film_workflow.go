@@ -6,10 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
@@ -43,25 +39,21 @@ type KMS interface {
 
 type FilmService struct {
 	repo      FilmRepository
-	pip       *pip.Provider
-	pdp       *pdp.Engine
-	applier   *pep.FilmApplier
+	enforcer  PolicyEnforcer
 	encryptor KMS
 	audit     *AuditService
 }
 
-func NewFilmService(repo FilmRepository, provider *pip.Provider, engine *pdp.Engine, applier *pep.FilmApplier, kms KMS, audit *AuditService) *FilmService {
+func NewFilmService(repo FilmRepository, policyEnforcer PolicyEnforcer, kms KMS, audit *AuditService) *FilmService {
 	return &FilmService{
 		repo:      repo,
-		pip:       provider,
-		pdp:       engine,
-		applier:   applier,
+		enforcer:  policyEnforcer,
 		encryptor: kms,
 		audit:     audit,
 	}
 }
 
-func (s *FilmService) List(ctx context.Context, principal types.Principal, reqCtx types.RequestContext) ([]FilmOutput, *perf.Context, error) {
+func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx RequestContext) ([]FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
 
 	stop := perf.Span(ctx, "db_ms")
@@ -73,25 +65,8 @@ func (s *FilmService) List(ctx context.Context, principal types.Principal, reqCt
 
 	out := make([]FilmOutput, 0, len(films))
 	for _, f := range films {
-		pi, err := s.pip.Build(ctx, pip.Input{
-			Principal:    principal,
-			Action:       "film.read",
-			ResourceType: "film",
-			ResourceID:   f.ID,
-			Request:      reqCtx,
-			CryptoMeta: map[string]map[string]string{
-				"time_elapsed": {"ciphertext_field": "time_elapsed_ct"},
-			},
-		})
-		if err != nil {
-			return nil, pctx, err
-		}
-
-		stop = perf.Span(ctx, "pdp_ms")
-		decision, _ := s.pdp.Evaluate(pi)
-		stop()
-
-		result, err := s.applier.Apply(ctx, decision, pep.FilmRow{
+		result, err := s.enforcer.EnforceFilmRead(ctx, principal, reqCtx, FilmReadInput{
+			FilmID:        f.ID,
 			Title:         f.Title,
 			TimeElapsedCT: f.TimeElapsedCT,
 		})
@@ -102,7 +77,7 @@ func (s *FilmService) List(ctx context.Context, principal types.Principal, reqCt
 		out = append(out, FilmOutput{
 			ID:          f.ID,
 			Title:       f.Title,
-			TimeElapsed: result.Payload["time_elapsed"],
+			TimeElapsed: result.TimeElapsed,
 		})
 	}
 	return out, pctx, nil
@@ -110,35 +85,22 @@ func (s *FilmService) List(ctx context.Context, principal types.Principal, reqCt
 
 func (s *FilmService) UpdateTime(
 	ctx context.Context,
-	principal types.Principal,
-	reqCtx types.RequestContext,
+	principal Principal,
+	reqCtx RequestContext,
 	filmID string,
 	timeElapsed int,
 ) (FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
 
-	piWrite, err := s.pip.Build(ctx, pip.Input{
-		Principal:    principal,
-		Action:       "film.update_time",
-		ResourceType: "film",
-		ResourceID:   filmID,
-		Request:      reqCtx,
-		CryptoMeta: map[string]map[string]string{
-			"time_elapsed": {"ciphertext_field": "time_elapsed_ct"},
-		},
-	})
+	decision, err := s.enforcer.EvaluateFilmUpdateTime(ctx, principal, reqCtx, filmID)
 	if err != nil {
 		return FilmOutput{}, pctx, err
 	}
-
-	stop := perf.Span(ctx, "pdp_ms")
-	writeDecision, _ := s.pdp.Evaluate(piWrite)
-	stop()
-	if !writeDecision.Allow {
+	if !decision.Allow {
 		return FilmOutput{}, pctx, ErrForbidden
 	}
 
-	stop = perf.Span(ctx, "kms_ms")
+	stop := perf.Span(ctx, "kms_ms")
 	ciphertext, err := s.encryptor.Encrypt(ctx, strconv.Itoa(timeElapsed))
 	stop()
 	if err != nil {
@@ -152,25 +114,8 @@ func (s *FilmService) UpdateTime(
 		return FilmOutput{}, pctx, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 
-	piRead, err := s.pip.Build(ctx, pip.Input{
-		Principal:    principal,
-		Action:       "film.read",
-		ResourceType: "film",
-		ResourceID:   updated.ID,
-		Request:      reqCtx,
-		CryptoMeta: map[string]map[string]string{
-			"time_elapsed": {"ciphertext_field": "time_elapsed_ct"},
-		},
-	})
-	if err != nil {
-		return FilmOutput{}, pctx, err
-	}
-
-	stop = perf.Span(ctx, "pdp_ms")
-	readDecision, _ := s.pdp.Evaluate(piRead)
-	stop()
-
-	result, err := s.applier.Apply(ctx, readDecision, pep.FilmRow{
+	result, err := s.enforcer.EnforceFilmRead(ctx, principal, reqCtx, FilmReadInput{
+		FilmID:        updated.ID,
 		Title:         updated.Title,
 		TimeElapsedCT: updated.TimeElapsedCT,
 	})
@@ -180,6 +125,6 @@ func (s *FilmService) UpdateTime(
 	return FilmOutput{
 		ID:          updated.ID,
 		Title:       updated.Title,
-		TimeElapsed: result.Payload["time_elapsed"],
+		TimeElapsed: result.TimeElapsed,
 	}, pctx, nil
 }

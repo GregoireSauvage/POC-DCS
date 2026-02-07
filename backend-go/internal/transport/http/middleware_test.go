@@ -7,6 +7,7 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
 // TestJWTMiddleware_ValidToken verifies JWT middleware extracts valid token
@@ -30,7 +31,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 	}
 
 	// Create a test handler that checks the extracted principal
-	var extractedPrincipal types.Principal
+	var extractedPrincipal service.Principal
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		extractedPrincipal = principalFromRequest(r)
 		w.WriteHeader(http.StatusOK)
@@ -191,7 +192,7 @@ func TestJWTMiddleware_FallbackToHeaders(t *testing.T) {
 		logger:     testLogger(),
 	}
 
-	var extractedPrincipal types.Principal
+	var extractedPrincipal service.Principal
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		extractedPrincipal = principalFromRequest(r)
 		w.WriteHeader(http.StatusOK)

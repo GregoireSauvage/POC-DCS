@@ -14,6 +14,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
@@ -102,6 +103,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	})
 	engine := pdp.NewEngine(rt, cm)
 	applier := pep.NewFilmApplier(rt, kmsClient)
+	policyEnforcer := enforcer.New(provider, engine, applier)
 
 	// Create audit service if DB available
 	var auditService *service.AuditService
@@ -113,7 +115,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("audit logging disabled (no database)")
 	}
 
-	filmFlow := service.NewFilmService(filmRepo, provider, engine, applier, kmsClient, auditService)
+	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService)
 
 	// Create JWT service
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
@@ -374,10 +376,10 @@ type contextKey string
 
 const jwtClaimsKey contextKey = "jwt_claims"
 
-func principalFromRequest(r *nethttp.Request) types.Principal {
+func principalFromRequest(r *nethttp.Request) service.Principal {
 	// Try to get JWT claims from context first
 	if claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims); ok {
-		return types.Principal{
+		return service.Principal{
 			TenantID: claims.TenantID,
 			UserID:   claims.UserID,
 			Username: claims.Username,
@@ -387,7 +389,7 @@ func principalFromRequest(r *nethttp.Request) types.Principal {
 	}
 
 	// Fallback to X-headers (for dev/testing without JWT)
-	return types.Principal{
+	return service.Principal{
 		TenantID: readHeaderOrDefault(r, "X-Tenant-ID", "t1"),
 		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
 		Username: readHeaderOrDefault(r, "X-Username", "dev"),
@@ -404,8 +406,8 @@ func parseScopes(scopesStr string) []string {
 	return []string{scopesStr}
 }
 
-func requestContextFromRequest(r *nethttp.Request, env string) types.RequestContext {
-	return types.RequestContext{
+func requestContextFromRequest(r *nethttp.Request, env string) service.RequestContext {
+	return service.RequestContext{
 		RequestID:   readHeaderOrDefault(r, "X-Request-ID", "http-no-request-id"),
 		ClientIP:    readHeaderOrDefault(r, "X-Real-IP", r.RemoteAddr),
 		Channel:     "web",

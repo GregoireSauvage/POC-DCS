@@ -65,7 +65,7 @@ func (v *VaultTransitClient) Encrypt(ctx context.Context, plaintext string) (str
 		"plaintext": encoded,
 	}
 
-	path := fmt.Sprintf("/v1/transit/encrypt/%s", v.transitKey)
+	path := fmt.Sprintf("transit/encrypt/%s", v.transitKey)
 	secret, err := v.client.Logical().WriteWithContext(ctx, path, payload)
 	if err != nil {
 		return "", fmt.Errorf("vault encrypt failed: %w", err)
@@ -103,7 +103,7 @@ func (v *VaultTransitClient) Decrypt(ctx context.Context, ciphertext string) (st
 		"ciphertext": ciphertext,
 	}
 
-	path := fmt.Sprintf("/v1/transit/decrypt/%s", v.transitKey)
+	path := fmt.Sprintf("transit/decrypt/%s", v.transitKey)
 	secret, err := v.client.Logical().WriteWithContext(ctx, path, payload)
 	if err != nil {
 		return "", fmt.Errorf("vault decrypt failed: %w", err)
@@ -151,7 +151,7 @@ func (v *VaultTransitClient) GetPepper(ctx context.Context, path string) ([]byte
 
 	// Vault KV v2 path format: /v1/{mount}/data/{path}
 	// Assuming default mount "secret"
-	kvPath := fmt.Sprintf("/v1/secret/data/%s", path)
+	kvPath := fmt.Sprintf("secret/data/%s", path)
 
 	secret, err := v.client.Logical().ReadWithContext(ctx, kvPath)
 	if err != nil {

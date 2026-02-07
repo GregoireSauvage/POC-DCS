@@ -121,6 +121,29 @@ func TestAuthService_Login_UserNotFound(t *testing.T) {
 	}
 }
 
+func TestAuthService_Login_RepositoryError(t *testing.T) {
+	mockRepo := &mockUserRepository{
+		err: errors.New("database timeout"),
+	}
+
+	jwtSvc := auth.NewJWTService("test-secret", "test-issuer", "test-audience", 60)
+	authSvc := NewAuthService(mockRepo, jwtSvc)
+
+	req := LoginRequest{
+		Username: "alice",
+		Password: "password123",
+		TenantID: "t1",
+	}
+
+	_, err := authSvc.Login(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected login to fail when repository errors")
+	}
+	if errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected wrapped repository error, got credential error: %v", err)
+	}
+}
+
 func TestAuthService_Login_DefaultTenant(t *testing.T) {
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
 

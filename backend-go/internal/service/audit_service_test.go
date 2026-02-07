@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -12,8 +13,9 @@ import (
 
 // Mock AuditLogRepository
 type mockAuditRepository struct {
-	logs    []*domain.AuditLog
+	logs      []*domain.AuditLog
 	createErr error
+	listErr   error
 }
 
 func (m *mockAuditRepository) Create(ctx context.Context, log *domain.AuditLog) error {
@@ -25,6 +27,9 @@ func (m *mockAuditRepository) Create(ctx context.Context, log *domain.AuditLog) 
 }
 
 func (m *mockAuditRepository) List(ctx context.Context, tenantID string, limit int) ([]*domain.AuditLog, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var result []*domain.AuditLog
 	for _, log := range m.logs {
 		if log.TenantID == tenantID {
@@ -35,6 +40,20 @@ func (m *mockAuditRepository) List(ctx context.Context, tenantID string, limit i
 		}
 	}
 	return result, nil
+}
+
+func TestAuditService_List_RepositoryError(t *testing.T) {
+	mockRepo := &mockAuditRepository{
+		logs:    []*domain.AuditLog{},
+		listErr: repository.ErrInvalidInput,
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditSvc := NewAuditService(mockRepo, logger)
+
+	_, err := auditSvc.List(context.Background(), "t1", 10)
+	if !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("expected repository error, got %v", err)
+	}
 }
 
 func TestAuditService_WriteAudit(t *testing.T) {
