@@ -28,15 +28,16 @@ import (
 )
 
 type Server struct {
-	cfg         *config.Config
-	logger      *slog.Logger
-	server      *nethttp.Server
-	mux         *nethttp.ServeMux
-	runtime     *runtime.Settings
-	cache       *cache.Manager
-	filmFlow    *service.FilmService
-	authService *service.AuthService
-	jwtService  *auth.JWTService
+	cfg          *config.Config
+	logger       *slog.Logger
+	server       *nethttp.Server
+	mux          *nethttp.ServeMux
+	runtime      *runtime.Settings
+	cache        *cache.Manager
+	filmFlow     *service.FilmService
+	authService  *service.AuthService
+	auditService *service.AuditService
+	jwtService   *auth.JWTService
 }
 
 func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
@@ -133,14 +134,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	mux := nethttp.NewServeMux()
 
 	s := &Server{
-		cfg:         cfg,
-		logger:      logger,
-		mux:         mux,
-		runtime:     rt,
-		cache:       cm,
-		filmFlow:    filmFlow,
-		authService: authSvc,
-		jwtService:  jwtSvc,
+		cfg:          cfg,
+		logger:       logger,
+		mux:          mux,
+		runtime:      rt,
+		cache:        cm,
+		filmFlow:     filmFlow,
+		authService:  authSvc,
+		auditService: auditService,
+		jwtService:   jwtSvc,
 		server: &nethttp.Server{
 			Addr:              cfg.HTTPAddr,
 			Handler:           mux,
@@ -166,8 +168,10 @@ func (s *Server) registerRoutes() {
 	// Auth routes (no JWT required)
 	s.mux.HandleFunc("/auth/login", s.handleLogin)
 
+	// Admin routes (strict JWT + admin role required)
+	s.mux.Handle("/admin/settings", s.adminMiddleware(nethttp.HandlerFunc(s.handleAdminSettings)))
+
 	// Protected routes (optional JWT - fallback to X-headers for dev)
-	s.mux.Handle("/admin/settings", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleAdminSettings)))
 	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
 	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
 }
@@ -342,6 +346,32 @@ func (s *Server) jwtMiddleware(next nethttp.Handler) nethttp.Handler {
 		ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// adminMiddleware requires valid JWT token with admin role
+func (s *Server) adminMiddleware(next nethttp.Handler) nethttp.Handler {
+	return s.jwtMiddleware(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		// Extract claims from context (set by jwtMiddleware)
+		claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims)
+		if !ok {
+			// Should not happen if jwtMiddleware is working correctly
+			writeError(w, nethttp.StatusUnauthorized, "missing authentication")
+			return
+		}
+
+		// Check if user has admin role
+		if claims.Role != "admin" {
+			s.logger.Warn("non-admin user attempted to access admin endpoint",
+				slog.String("user_id", claims.UserID),
+				slog.String("role", claims.Role),
+				slog.String("path", r.URL.Path),
+			)
+			writeError(w, nethttp.StatusForbidden, "admin role required")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}))
 }
 
 // optionalJWTMiddleware tries to extract JWT but falls back to X-headers if not present (backward compatibility)

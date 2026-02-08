@@ -3,13 +3,13 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"log/slog"
-
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -23,14 +23,35 @@ func newTestServer(t *testing.T) *Server {
 		DCSMode:         "on",
 		CacheLevel:      1,
 		CacheMaxEntries: 100,
+		JWTSecret:       "test-secret",
+		JWTIssuer:       "test-issuer",
+		JWTAudience:     "test-audience",
+		JWTTTLMin:       60,
 	}
 	return NewServer(cfg, slog.Default(), nil) // nil DB for test
 }
 
+func adminAuthHeader(t *testing.T, s *Server) string {
+	t.Helper()
+	token, err := s.jwtService.GenerateToken(
+		types.Principal{
+			UserID:   "admin-id",
+			TenantID: "t1",
+			Username: "admin",
+			Role:     "admin",
+		}, "")
+	if err != nil {
+		t.Fatalf("failed to generate admin token: %v", err)
+	}
+	return "Bearer " + token
+}
+
 func TestServer_AdminSettingsRoundTrip(t *testing.T) {
 	s := newTestServer(t)
+	authHeader := adminAuthHeader(t, s)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/settings", nil)
+	req.Header.Set("Authorization", authHeader)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -40,6 +61,7 @@ func TestServer_AdminSettingsRoundTrip(t *testing.T) {
 	payload := map[string]interface{}{"dcs_mode": "off", "cache_level": 3}
 	raw, _ := json.Marshal(payload)
 	req = httptest.NewRequest(http.MethodPatch, "/admin/settings", bytes.NewReader(raw))
+	req.Header.Set("Authorization", authHeader)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -48,6 +70,7 @@ func TestServer_AdminSettingsRoundTrip(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/admin/settings", nil)
+	req.Header.Set("Authorization", authHeader)
 	rec = httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -93,6 +116,7 @@ func TestServer_DcsToggleAffectsFilmRead(t *testing.T) {
 
 	raw, _ := json.Marshal(map[string]interface{}{"dcs_mode": "off"})
 	req = httptest.NewRequest(http.MethodPatch, "/admin/settings", bytes.NewReader(raw))
+	req.Header.Set("Authorization", adminAuthHeader(t, s))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
