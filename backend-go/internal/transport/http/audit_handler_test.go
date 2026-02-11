@@ -338,11 +338,11 @@ func TestAudit_LimitQueryParam(t *testing.T) {
 	server, adminToken, _ := newTestServerWithAudit(t, auditRepo, nil)
 
 	tests := []struct {
-		name           string
-		query          string
-		expectedCode   int
-		expectedLimit  int
-		expectError    bool
+		name          string
+		query         string
+		expectedCode  int
+		expectedLimit int
+		expectError   bool
 	}{
 		{
 			name:          "valid limit 50",

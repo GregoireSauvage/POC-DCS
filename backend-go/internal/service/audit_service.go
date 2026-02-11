@@ -10,15 +10,21 @@ import (
 
 // AuditService handles audit logging
 type AuditService struct {
-	repo   repository.AuditLogRepository
-	logger *slog.Logger
+	repo     repository.AuditLogRepository
+	enforcer PolicyEnforcer
+	logger   *slog.Logger
 }
 
 // NewAuditService creates a new audit service
-func NewAuditService(repo repository.AuditLogRepository, logger *slog.Logger) *AuditService {
+func NewAuditService(
+	repo repository.AuditLogRepository,
+	enforcer PolicyEnforcer,
+	logger *slog.Logger,
+) *AuditService {
 	return &AuditService{
-		repo:   repo,
-		logger: logger,
+		repo:     repo,
+		enforcer: enforcer,
+		logger:   logger,
 	}
 }
 
@@ -50,11 +56,26 @@ func (s *AuditService) WriteAudit(ctx context.Context, log *domain.AuditLog) err
 	return nil
 }
 
-// List returns audit logs for a tenant
-func (s *AuditService) List(ctx context.Context, tenantID string, limit int) ([]*domain.AuditLog, error) {
-	if s.repo == nil {
-		return nil, nil
+// List returns audit logs for a tenant after DCS evaluation
+func (s *AuditService) List(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	limit int,
+) ([]*domain.AuditLog, error) {
+	if s.enforcer != nil {
+		decision, err := s.enforcer.EvaluateAuditRead(ctx, principal, reqCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !decision.Allow {
+			return nil, ErrForbidden
+		}
 	}
 
-	return s.repo.List(ctx, tenantID, limit)
+	if s.repo == nil {
+		return []*domain.AuditLog{}, nil
+	}
+
+	return s.repo.List(ctx, principal.TenantID, limit)
 }

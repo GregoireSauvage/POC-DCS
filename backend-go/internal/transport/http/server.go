@@ -2,13 +2,9 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	nethttp "net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
@@ -21,7 +17,6 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -37,6 +32,7 @@ type Server struct {
 	filmFlow     *service.FilmService
 	authService  *service.AuthService
 	auditService *service.AuditService
+	perfService  service.PerfService
 	jwtService   *auth.JWTService
 }
 
@@ -110,7 +106,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	var auditService *service.AuditService
 	if db != nil {
 		auditRepo := postgres.NewAuditLogRepository(db)
-		auditService = service.NewAuditService(auditRepo, logger.With(slog.String("component", "audit")))
+		auditService = service.NewAuditService(
+			auditRepo,
+			policyEnforcer,
+			logger.With(slog.String("component", "audit")),
+		)
 		logger.Info("audit logging enabled")
 	} else {
 		logger.Warn("audit logging disabled (no database)")
@@ -170,309 +170,13 @@ func (s *Server) registerRoutes() {
 
 	// Admin routes (strict JWT + admin role required)
 	s.mux.Handle("/admin/settings", s.adminMiddleware(nethttp.HandlerFunc(s.handleAdminSettings)))
+	s.mux.Handle("/audit", s.adminMiddleware(nethttp.HandlerFunc(s.handleAudit)))
+	s.mux.Handle("/perf", s.adminMiddleware(nethttp.HandlerFunc(s.handlePerf)))
+	s.mux.Handle("/perf/summary", s.adminMiddleware(nethttp.HandlerFunc(s.handlePerfSummary)))
 
 	// Protected routes (optional JWT - fallback to X-headers for dev)
 	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
 	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
-}
-
-type adminSettingsUpdate struct {
-	DCSMode    *string `json:"dcs_mode"`
-	CacheLevel *int    `json:"cache_level"`
-}
-
-func (s *Server) handleLogin(w nethttp.ResponseWriter, r *nethttp.Request) {
-	if r.Method != nethttp.MethodPost {
-		w.WriteHeader(nethttp.StatusMethodNotAllowed)
-		return
-	}
-
-	// Check if auth service is available
-	if s.authService == nil {
-		writeError(w, nethttp.StatusServiceUnavailable, "authentication service unavailable")
-		return
-	}
-
-	var req service.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, nethttp.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	// Validate required fields
-	if strings.TrimSpace(req.Username) == "" {
-		writeError(w, nethttp.StatusBadRequest, "username is required")
-		return
-	}
-	if strings.TrimSpace(req.Password) == "" {
-		writeError(w, nethttp.StatusBadRequest, "password is required")
-		return
-	}
-
-	// Attempt login
-	resp, err := s.authService.Login(r.Context(), req)
-	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			writeError(w, nethttp.StatusUnauthorized, "invalid credentials")
-		} else {
-			s.logger.Error("login failed", slog.String("error", err.Error()), slog.String("username", req.Username))
-			writeError(w, nethttp.StatusInternalServerError, "internal server error")
-		}
-		return
-	}
-
-	writeJSON(w, nethttp.StatusOK, resp)
-}
-
-func (s *Server) handleAdminSettings(w nethttp.ResponseWriter, r *nethttp.Request) {
-	switch r.Method {
-	case nethttp.MethodGet:
-		writeJSON(w, nethttp.StatusOK, map[string]interface{}{
-			"dcs_mode":    s.runtime.Mode(),
-			"cache_level": s.runtime.CacheLevel(),
-		})
-		return
-	case nethttp.MethodPatch:
-		var payload adminSettingsUpdate
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, nethttp.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if payload.DCSMode != nil {
-			mode := strings.ToLower(strings.TrimSpace(*payload.DCSMode))
-			if mode != "on" && mode != "off" {
-				writeError(w, nethttp.StatusBadRequest, "dcs_mode must be 'on' or 'off'")
-				return
-			}
-		}
-		if payload.CacheLevel != nil && *payload.CacheLevel < 0 {
-			writeError(w, nethttp.StatusBadRequest, "cache_level must be >= 0")
-			return
-		}
-
-		s.runtime.Set(payload.DCSMode, payload.CacheLevel)
-		s.cache.ClearAll()
-		writeJSON(w, nethttp.StatusOK, map[string]interface{}{
-			"dcs_mode":    s.runtime.Mode(),
-			"cache_level": s.runtime.CacheLevel(),
-		})
-		return
-	default:
-		w.WriteHeader(nethttp.StatusMethodNotAllowed)
-		return
-	}
-}
-
-func (s *Server) handleFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
-	if r.Method != nethttp.MethodGet {
-		w.WriteHeader(nethttp.StatusMethodNotAllowed)
-		return
-	}
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
-
-	films, pctx, err := s.filmFlow.List(r.Context(), principal, reqCtx)
-	if err != nil {
-		writeError(w, nethttp.StatusInternalServerError, err.Error())
-		return
-	}
-	setPerfHeaders(w, pctx)
-	writeJSON(w, nethttp.StatusOK, films)
-}
-
-func (s *Server) handleFilmSubroutes(w nethttp.ResponseWriter, r *nethttp.Request) {
-	if r.Method != nethttp.MethodPatch {
-		w.WriteHeader(nethttp.StatusMethodNotAllowed)
-		return
-	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/films/"), "/")
-	if len(parts) != 2 || parts[1] != "time" || strings.TrimSpace(parts[0]) == "" {
-		writeError(w, nethttp.StatusNotFound, "not found")
-		return
-	}
-	timeElapsedRaw := r.URL.Query().Get("time_elapsed")
-	timeElapsed, err := strconv.Atoi(timeElapsedRaw)
-	if err != nil || timeElapsed < 0 {
-		writeError(w, nethttp.StatusBadRequest, "time_elapsed must be a non-negative integer")
-		return
-	}
-
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
-	film, pctx, err := s.filmFlow.UpdateTime(r.Context(), principal, reqCtx, parts[0], timeElapsed)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrForbidden):
-			writeError(w, nethttp.StatusForbidden, "forbidden")
-		case errors.Is(err, service.ErrNotFound):
-			writeError(w, nethttp.StatusNotFound, "film not found")
-		default:
-			writeError(w, nethttp.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-	setPerfHeaders(w, pctx)
-	writeJSON(w, nethttp.StatusOK, film)
-}
-
-// jwtMiddleware validates JWT token and rejects requests without valid token
-func (s *Server) jwtMiddleware(next nethttp.Handler) nethttp.Handler {
-	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		// Extract token from Authorization header
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			writeError(w, nethttp.StatusUnauthorized, "missing authorization header")
-			return
-		}
-
-		// Parse "Bearer <token>"
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			writeError(w, nethttp.StatusUnauthorized, "invalid authorization header format")
-			return
-		}
-
-		tokenString := parts[1]
-
-		// Validate token
-		claims, err := s.jwtService.ValidateToken(tokenString)
-		if err != nil {
-			s.logger.Debug("jwt validation failed", slog.String("error", err.Error()))
-			writeError(w, nethttp.StatusUnauthorized, "invalid or expired token")
-			return
-		}
-
-		// Store claims in context
-		ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// adminMiddleware requires valid JWT token with admin role
-func (s *Server) adminMiddleware(next nethttp.Handler) nethttp.Handler {
-	return s.jwtMiddleware(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		// Extract claims from context (set by jwtMiddleware)
-		claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims)
-		if !ok {
-			// Should not happen if jwtMiddleware is working correctly
-			writeError(w, nethttp.StatusUnauthorized, "missing authentication")
-			return
-		}
-
-		// Check if user has admin role
-		if claims.Role != "admin" {
-			s.logger.Warn("non-admin user attempted to access admin endpoint",
-				slog.String("user_id", claims.UserID),
-				slog.String("role", claims.Role),
-				slog.String("path", r.URL.Path),
-			)
-			writeError(w, nethttp.StatusForbidden, "admin role required")
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	}))
-}
-
-// optionalJWTMiddleware tries to extract JWT but falls back to X-headers if not present (backward compatibility)
-func (s *Server) optionalJWTMiddleware(next nethttp.Handler) nethttp.Handler {
-	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		// Try to extract JWT token
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" {
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
-				// Validate token
-				claims, err := s.jwtService.ValidateToken(parts[1])
-				if err == nil {
-					// Valid JWT - store in context
-					ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-				// Invalid JWT - return 401
-				s.logger.Debug("jwt validation failed", slog.String("error", err.Error()))
-				writeError(w, nethttp.StatusUnauthorized, "invalid or expired token")
-				return
-			}
-		}
-
-		// No JWT or invalid format - fallback to X-headers for dev/testing
-		next.ServeHTTP(w, r)
-	})
-}
-
-type contextKey string
-
-const jwtClaimsKey contextKey = "jwt_claims"
-
-func principalFromRequest(r *nethttp.Request) service.Principal {
-	// Try to get JWT claims from context first
-	if claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims); ok {
-		return service.Principal{
-			TenantID: claims.TenantID,
-			UserID:   claims.UserID,
-			Username: claims.Username,
-			Role:     claims.Role,
-			Scopes:   parseScopes(claims.Scopes),
-		}
-	}
-
-	// Fallback to X-headers (for dev/testing without JWT)
-	return service.Principal{
-		TenantID: readHeaderOrDefault(r, "X-Tenant-ID", "t1"),
-		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
-		Username: readHeaderOrDefault(r, "X-Username", "dev"),
-		Role:     readHeaderOrDefault(r, "X-Role", "developer"),
-	}
-}
-
-func parseScopes(scopesStr string) []string {
-	if scopesStr == "" {
-		return nil
-	}
-	// For now, return as single-element array
-	// In future, could split by space: strings.Fields(scopesStr)
-	return []string{scopesStr}
-}
-
-func requestContextFromRequest(r *nethttp.Request, env string) service.RequestContext {
-	return service.RequestContext{
-		RequestID:   readHeaderOrDefault(r, "X-Request-ID", "http-no-request-id"),
-		ClientIP:    readHeaderOrDefault(r, "X-Real-IP", r.RemoteAddr),
-		Channel:     "web",
-		Purpose:     "cinema_ops",
-		DeviceTrust: 0.8,
-		Env:         env,
-	}
-}
-
-func readHeaderOrDefault(r *nethttp.Request, key, fallback string) string {
-	val := strings.TrimSpace(r.Header.Get(key))
-	if val == "" {
-		return fallback
-	}
-	return val
-}
-
-func setPerfHeaders(w nethttp.ResponseWriter, pctx *perf.Context) {
-	if pctx == nil {
-		return
-	}
-	w.Header().Set("x-perf-total-ms", fmt.Sprintf("%.3f", pctx.TotalMS()))
-	for key, value := range pctx.Metrics() {
-		w.Header().Set("x-perf-"+strings.ReplaceAll(key, "_", "-"), fmt.Sprintf("%.3f", value))
-	}
-}
-
-func writeError(w nethttp.ResponseWriter, code int, message string) {
-	writeJSON(w, code, map[string]interface{}{"detail": message})
-}
-
-func writeJSON(w nethttp.ResponseWriter, code int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (s *Server) Start(ctx context.Context) error {

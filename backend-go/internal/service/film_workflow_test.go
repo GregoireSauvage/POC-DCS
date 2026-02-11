@@ -61,6 +61,14 @@ type fakePolicyEnforcer struct {
 	readFunc     func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
 }
 
+func (f *fakePolicyEnforcer) EvaluateAuditRead(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+) (AuthorizationDecision, error) {
+	return AuthorizationDecision{Allow: true, Reason: "audit allowed"}, nil
+}
+
 func (f *fakePolicyEnforcer) EvaluateFilmUpdateTime(
 	ctx context.Context,
 	principal Principal,

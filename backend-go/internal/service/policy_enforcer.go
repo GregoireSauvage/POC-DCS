@@ -35,6 +35,11 @@ type AuthorizationDecision struct {
 }
 
 type PolicyEnforcer interface {
+	EvaluateAuditRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
 	EvaluateFilmUpdateTime(
 		ctx context.Context,
 		principal Principal,

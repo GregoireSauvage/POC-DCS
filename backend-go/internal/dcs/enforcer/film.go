@@ -41,6 +41,32 @@ func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 	}, nil
 }
 
+func (e *DcsEnforcer) EvaluateAuditRead(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+) (service.AuthorizationDecision, error) {
+	pi, err := e.pip.Build(ctx, pip.Input{
+		Principal:    toDCSPrincipal(principal),
+		Action:       "audit.read",
+		ResourceType: "audit",
+		ResourceID:   "audit",
+		Request:      toDCSRequestContext(reqCtx),
+	})
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
+
+	stop := perf.Span(ctx, "pdp_ms")
+	decision, _ := e.pdp.Evaluate(pi)
+	stop()
+
+	return service.AuthorizationDecision{
+		Allow:  decision.Allow,
+		Reason: decision.Reason,
+	}, nil
+}
+
 func (e *DcsEnforcer) EnforceFilmRead(
 	ctx context.Context,
 	principal service.Principal,

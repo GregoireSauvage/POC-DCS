@@ -48,9 +48,9 @@ func TestAuditService_List_RepositoryError(t *testing.T) {
 		listErr: repository.ErrInvalidInput,
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, logger)
+	auditSvc := NewAuditService(mockRepo, nil, logger)
 
-	_, err := auditSvc.List(context.Background(), "t1", 10)
+	_, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if !errors.Is(err, repository.ErrInvalidInput) {
 		t.Fatalf("expected repository error, got %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAuditService_List_RepositoryError(t *testing.T) {
 func TestAuditService_WriteAudit(t *testing.T) {
 	mockRepo := &mockAuditRepository{logs: make([]*domain.AuditLog, 0)}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, logger)
+	auditSvc := NewAuditService(mockRepo, nil, logger)
 
 	log := &domain.AuditLog{
 		RequestID:       "req-123",
@@ -96,7 +96,7 @@ func TestAuditService_WriteAudit(t *testing.T) {
 
 func TestAuditService_WriteAudit_NoRepository(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(nil, logger)
+	auditSvc := NewAuditService(nil, nil, logger)
 
 	log := &domain.AuditLog{
 		RequestID: "req-123",
@@ -116,7 +116,7 @@ func TestAuditService_WriteAudit_RepositoryError(t *testing.T) {
 		createErr: repository.ErrInvalidInput,
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, logger)
+	auditSvc := NewAuditService(mockRepo, nil, logger)
 
 	log := &domain.AuditLog{
 		RequestID: "req-123",
@@ -138,9 +138,9 @@ func TestAuditService_List(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, logger)
+	auditSvc := NewAuditService(mockRepo, nil, logger)
 
-	logs, err := auditSvc.List(context.Background(), "t1", 10)
+	logs, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -158,14 +158,14 @@ func TestAuditService_List(t *testing.T) {
 
 func TestAuditService_List_NoRepository(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(nil, logger)
+	auditSvc := NewAuditService(nil, nil, logger)
 
-	logs, err := auditSvc.List(context.Background(), "t1", 10)
+	logs, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if err != nil {
 		t.Fatalf("List with nil repo should not error, got: %v", err)
 	}
 
-	if logs != nil {
-		t.Error("Expected nil logs when repo is nil")
+	if logs == nil {
+		t.Error("Expected empty slice when repo is nil")
 	}
 }
