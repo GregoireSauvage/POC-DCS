@@ -44,3 +44,33 @@ func (r *FilmRepository) UpdateTimeCiphertext(_ context.Context, tenantID, filmI
 	}
 	return service.FilmRecord{}, errors.New("film not found")
 }
+
+func (r *FilmRepository) Create(_ context.Context, tenantID, title, timeElapsedCT string) (service.FilmRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Generate a simple ID for in-memory repository
+	id := generateID()
+	record := service.FilmRecord{
+		ID:            id,
+		TenantID:      tenantID,
+		Title:         title,
+		TimeElapsedCT: timeElapsedCT,
+	}
+	r.films = append(r.films, record)
+	return record, nil
+}
+
+// generateID creates a simple ID for in-memory storage (not production-ready)
+func generateID() string {
+	return "film-" + randomString(8)
+}
+
+func randomString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[i%len(letters)]
+	}
+	return string(b)
+}

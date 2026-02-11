@@ -40,6 +40,11 @@ func (f *fakeFilmRepo) UpdateTimeCiphertext(_ context.Context, tenantID, filmID,
 	return FilmRecord{}, errors.New("not found")
 }
 
+func (f *fakeFilmRepo) Create(_ context.Context, tenantID, title, timeElapsedCT string) (FilmRecord, error) {
+	// Stub implementation - not used in most tests
+	return FilmRecord{}, nil
+}
+
 type fakeKMS struct {
 	encryptValue string
 	encryptErr   error
@@ -59,8 +64,9 @@ func (f *fakeKMS) Decrypt(_ context.Context, _ string) (string, error) {
 }
 
 type fakePolicyEnforcer struct {
-	evaluateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
-	readFunc     func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
+	evaluateFunc       func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
+	evaluateCreateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
+	readFunc           func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
 }
 
 func (f *fakePolicyEnforcer) EvaluateAuditRead(
@@ -77,6 +83,17 @@ func (f *fakePolicyEnforcer) EvaluatePerfRead(
 	reqCtx RequestContext,
 ) (AuthorizationDecision, error) {
 	return AuthorizationDecision{Allow: true, Reason: "perf allowed"}, nil
+}
+
+func (f *fakePolicyEnforcer) EvaluateFilmCreate(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+) (AuthorizationDecision, error) {
+	if f.evaluateCreateFunc == nil {
+		return AuthorizationDecision{Allow: false, Reason: "no create evaluator"}, nil
+	}
+	return f.evaluateCreateFunc(ctx, principal, reqCtx)
 }
 
 func (f *fakePolicyEnforcer) EvaluateFilmUpdateTime(

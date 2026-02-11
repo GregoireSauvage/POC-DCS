@@ -25,7 +25,7 @@ func NewEngine(rt *runtime.Settings, cm *cache.Manager) *Engine {
 }
 
 func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
-	cacheable := e.cache.LevelEnabled(2) && (input.Action == "film.read" || input.Action == "film.update_time")
+	cacheable := e.cache.LevelEnabled(2) && (input.Action == "film.read" || input.Action == "film.update_time" || input.Action == "film.create")
 	cacheKey := ""
 	if cacheable {
 		cacheKey = decisionCacheKey(e.runtime.DcsEnabled(), input)
@@ -44,6 +44,9 @@ func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
 	} else {
 		decision = decide(input)
 	}
+
+	// Compute decision hash for audit correlation
+	decision.Hash = DecisionHash(decision)
 
 	if cacheable {
 		e.cache.PDP.Set(cacheKey, decision, 0)

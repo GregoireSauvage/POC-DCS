@@ -8,10 +8,6 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 )
 
-// ============================================================================
-// Mock Audit Service for Testing
-// ============================================================================
-
 type mockAuditService struct {
 	writeCalls   int
 	lastAuditLog *domain.AuditLog
@@ -32,10 +28,6 @@ func (m *mockAuditService) WriteAudit(ctx context.Context, log *domain.AuditLog)
 func (m *mockAuditService) List(ctx context.Context, principal Principal, reqCtx RequestContext, limit int) ([]*domain.AuditLog, error) {
 	return nil, errors.New("not implemented in mock")
 }
-
-// ============================================================================
-// GET /films - Audit Logging Tests
-// ============================================================================
 
 func TestFilmService_List_WritesAudit_AdminDecrypts(t *testing.T) {
 	// Setup
@@ -343,10 +335,6 @@ func TestFilmService_List_AuditError_DoesNotFail(t *testing.T) {
 
 	t.Log("List succeeded despite audit write error (graceful degradation)")
 }
-
-// ============================================================================
-// PATCH /films/{id}/time - Audit Logging Tests
-// ============================================================================
 
 func TestFilmService_UpdateTime_WritesAudit_Allow(t *testing.T) {
 	// Setup

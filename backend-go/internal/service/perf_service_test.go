@@ -43,6 +43,10 @@ func (m *mockPolicyEnforcer) EvaluatePerfRead(ctx context.Context, principal Pri
 }
 
 // Stub implementations for other enforcer methods (not used in perf tests)
+func (m *mockPolicyEnforcer) EvaluateFilmCreate(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
 func (m *mockPolicyEnforcer) EvaluateFilmUpdateTime(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
 	return AuthorizationDecision{}, errors.New("not implemented")
 }
@@ -277,10 +281,6 @@ func TestPerfService_Summary_RepoError(t *testing.T) {
 		t.Fatalf("expected repo error, got ErrForbidden")
 	}
 }
-
-// ============================================================================
-// DCS Enforcer Integration Tests (NEW)
-// ============================================================================
 
 func TestPerfService_List_EnforcerAllows(t *testing.T) {
 	repo := &mockPerfLogRepository{

@@ -25,6 +25,11 @@ type FilmReadInput struct {
 	TimeElapsedCT string
 }
 
+type FilmCreateInput struct {
+	Title       string
+	TimeElapsed int
+}
+
 type FilmReadResult struct {
 	TimeElapsed     interface{}
 	FieldsDecrypted []string // Fields that were decrypted for audit logging
@@ -33,8 +38,9 @@ type FilmReadResult struct {
 }
 
 type AuthorizationDecision struct {
-	Allow  bool
-	Reason string
+	Allow        bool
+	Reason       string
+	DecisionHash string // Hash of PDP decision for audit correlation
 }
 
 type PolicyEnforcer interface {
@@ -44,6 +50,11 @@ type PolicyEnforcer interface {
 		reqCtx RequestContext,
 	) (AuthorizationDecision, error)
 	EvaluatePerfRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EvaluateFilmCreate(
 		ctx context.Context,
 		principal Principal,
 		reqCtx RequestContext,

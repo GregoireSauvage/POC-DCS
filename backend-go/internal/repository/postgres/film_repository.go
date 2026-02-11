@@ -74,8 +74,31 @@ func (r *FilmRepository) GetByID(ctx context.Context, tenantID, filmID string) (
 	return film, nil
 }
 
-// Create inserts a new film
-func (r *FilmRepository) Create(ctx context.Context, film *domain.Film) error {
+// Create inserts a new film and returns the created record
+func (r *FilmRepository) Create(ctx context.Context, tenantID, title, timeElapsedCT string) (service.FilmRecord, error) {
+	query := `
+		INSERT INTO films (id, tenant_id, title, time_elapsed_ct, labels, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, '{}', NOW())
+		RETURNING id, tenant_id, title, time_elapsed_ct
+	`
+
+	var record service.FilmRecord
+	err := r.pool.QueryRow(ctx, query, tenantID, title, timeElapsedCT).Scan(
+		&record.ID,
+		&record.TenantID,
+		&record.Title,
+		&record.TimeElapsedCT,
+	)
+
+	if err != nil {
+		return service.FilmRecord{}, fmt.Errorf("failed to create film: %w", err)
+	}
+
+	return record, nil
+}
+
+// CreateFromDomain inserts a new film from a domain entity (for migrations/seeds)
+func (r *FilmRepository) CreateFromDomain(ctx context.Context, film *domain.Film) error {
 	if film.CreatedAt.IsZero() {
 		film.CreatedAt = time.Now().UTC()
 	}

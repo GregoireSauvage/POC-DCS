@@ -25,6 +25,22 @@ func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.Film
 	}
 }
 
+func (e *DcsEnforcer) EvaluateFilmCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+) (service.AuthorizationDecision, error) {
+	decision, err := e.evaluate(ctx, principal, reqCtx, "film.create", "")
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
+	return service.AuthorizationDecision{
+		Allow:        decision.Allow,
+		Reason:       decision.Reason,
+		DecisionHash: decision.Hash,
+	}, nil
+}
+
 func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 	ctx context.Context,
 	principal service.Principal,
@@ -36,8 +52,9 @@ func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:  decision.Allow,
-		Reason: decision.Reason,
+		Allow:        decision.Allow,
+		Reason:       decision.Reason,
+		DecisionHash: decision.Hash,
 	}, nil
 }
 
