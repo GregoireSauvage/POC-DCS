@@ -30,6 +30,12 @@ type mockPerfService struct {
 	lastAllCacheLevels bool
 }
 
+func (m *mockPerfService) Write(ctx context.Context, log *domain.PerfLog) error {
+	_ = ctx
+	_ = log
+	return nil
+}
+
 func (m *mockPerfService) List(
 	ctx context.Context,
 	principal service.Principal,

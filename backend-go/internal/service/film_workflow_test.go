@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 )
 
 type fakeFilmRepo struct {
@@ -69,6 +71,14 @@ func (f *fakePolicyEnforcer) EvaluateAuditRead(
 	return AuthorizationDecision{Allow: true, Reason: "audit allowed"}, nil
 }
 
+func (f *fakePolicyEnforcer) EvaluatePerfRead(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+) (AuthorizationDecision, error) {
+	return AuthorizationDecision{Allow: true, Reason: "perf allowed"}, nil
+}
+
 func (f *fakePolicyEnforcer) EvaluateFilmUpdateTime(
 	ctx context.Context,
 	principal Principal,
@@ -93,8 +103,29 @@ func (f *fakePolicyEnforcer) EnforceFilmRead(
 	return f.readFunc(ctx, principal, reqCtx, film)
 }
 
+type fakePerfWriter struct {
+	calls   int
+	lastLog *domain.PerfLog
+	err     error
+}
+
+func (f *fakePerfWriter) Write(ctx context.Context, log *domain.PerfLog) error {
+	_ = ctx
+	f.calls++
+	f.lastLog = log
+	return f.err
+}
+
+type fakeRuntimeSettings struct {
+	dcsEnabled bool
+	cacheLevel int
+}
+
+func (f fakeRuntimeSettings) DcsEnabled() bool { return f.dcsEnabled }
+func (f fakeRuntimeSettings) CacheLevel() int { return f.cacheLevel }
+
 func buildFilmServiceForTest(repo FilmRepository, kms KMS) *FilmService {
-	return NewFilmService(repo, defaultPolicyEnforcer(), kms, nil) // audit service not needed for tests
+	return NewFilmService(repo, defaultPolicyEnforcer(), kms, nil, nil, nil) // audit service not needed for tests
 }
 
 func defaultPolicyEnforcer() *fakePolicyEnforcer {
@@ -107,9 +138,19 @@ func defaultPolicyEnforcer() *fakePolicyEnforcer {
 		},
 		readFunc: func(_ context.Context, principal Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 			if principal.Role == "admin" {
-				return FilmReadResult{TimeElapsed: 240}, nil
+				return FilmReadResult{
+					TimeElapsed:     240,
+					FieldsDecrypted: []string{"time_elapsed"},
+					FieldsMasked:    []string{},
+					FieldsDenied:    []string{},
+				}, nil
 			}
-			return FilmReadResult{TimeElapsed: "1***"}, nil
+			return FilmReadResult{
+				TimeElapsed:     "1***",
+				FieldsDecrypted: []string{},
+				FieldsMasked:    []string{"time_elapsed"},
+				FieldsDenied:    []string{},
+			}, nil
 		},
 	}
 }
@@ -203,7 +244,7 @@ func TestFilmService_List_EnforcerError(t *testing.T) {
 	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 		return FilmReadResult{}, enforcerErr
 	}
-	svc := NewFilmService(repo, policy, &fakeKMS{}, nil)
+	svc := NewFilmService(repo, policy, &fakeKMS{}, nil, nil, nil)
 
 	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
 	if !errors.Is(err, enforcerErr) {
@@ -221,7 +262,7 @@ func TestFilmService_UpdateTime_EvaluateError(t *testing.T) {
 		return AuthorizationDecision{}, evalErr
 	}
 	kms := &fakeKMS{encryptValue: "vault:v1:new"}
-	svc := NewFilmService(repo, policy, kms, nil)
+	svc := NewFilmService(repo, policy, kms, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if !errors.Is(err, evalErr) {
@@ -274,10 +315,114 @@ func TestFilmService_UpdateTime_ReadEnforcerError(t *testing.T) {
 	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 		return FilmReadResult{}, readErr
 	}
-	svc := NewFilmService(repo, policy, &fakeKMS{encryptValue: "vault:v1:new"}, nil)
+	svc := NewFilmService(repo, policy, &fakeKMS{encryptValue: "vault:v1:new"}, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if !errors.Is(err, readErr) {
 		t.Fatalf("expected read enforcer error, got %v", err)
+	}
+}
+
+func TestFilmService_List_WritesPerfLog(t *testing.T) {
+	repo := &fakeFilmRepo{
+		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+	}
+	perfWriter := &fakePerfWriter{}
+	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), &fakeKMS{}, nil, perfWriter, runtime)
+
+	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
+	reqCtx := RequestContext{RequestID: "req-123", ClientIP: "127.0.0.1"}
+
+	_, _, err := svc.List(context.Background(), principal, reqCtx)
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+
+	if perfWriter.calls != 1 {
+		t.Fatalf("expected perf writer called once, got %d", perfWriter.calls)
+	}
+	log := perfWriter.lastLog
+	if log == nil {
+		t.Fatal("expected perf log captured")
+	}
+	if log.Action != "film.read" || log.ResourceType != "film" {
+		t.Fatalf("unexpected action/resource: %s/%s", log.Action, log.ResourceType)
+	}
+	if log.RequestID != "req-123" || log.TenantID != "t1" {
+		t.Fatalf("unexpected request/tenant: %s/%s", log.RequestID, log.TenantID)
+	}
+	if log.SubjectUserID != "u1" || log.SubjectRole != "developer" {
+		t.Fatalf("unexpected subject fields: %s/%s", log.SubjectUserID, log.SubjectRole)
+	}
+	if !log.DCSEnabled || log.CacheLevel != 2 {
+		t.Fatalf("unexpected dcs/cache: %v/%d", log.DCSEnabled, log.CacheLevel)
+	}
+	if log.DBMS == nil {
+		t.Fatalf("expected db_ms to be recorded")
+	}
+}
+
+func TestFilmService_UpdateTime_WritesPerfLog(t *testing.T) {
+	repo := &fakeFilmRepo{
+		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+	}
+	perfWriter := &fakePerfWriter{}
+	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 1}
+	kms := &fakeKMS{encryptValue: "vault:v1:new"}
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), kms, nil, perfWriter, runtime)
+
+	principal := Principal{TenantID: "t1", UserID: "u9", Username: "admin", Role: "admin"}
+	reqCtx := RequestContext{RequestID: "req-999", ClientIP: "127.0.0.1"}
+
+	_, _, err := svc.UpdateTime(context.Background(), principal, reqCtx, "f1", 240)
+	if err != nil {
+		t.Fatalf("update time failed: %v", err)
+	}
+
+	if perfWriter.calls != 1 {
+		t.Fatalf("expected perf writer called once, got %d", perfWriter.calls)
+	}
+	log := perfWriter.lastLog
+	if log == nil {
+		t.Fatal("expected perf log captured")
+	}
+	if log.Action != "film.update_time" || log.ResourceType != "film" {
+		t.Fatalf("unexpected action/resource: %s/%s", log.Action, log.ResourceType)
+	}
+	if log.RequestID != "req-999" || log.TenantID != "t1" {
+		t.Fatalf("unexpected request/tenant: %s/%s", log.RequestID, log.TenantID)
+	}
+	if log.SubjectUserID != "u9" || log.SubjectRole != "admin" {
+		t.Fatalf("unexpected subject fields: %s/%s", log.SubjectUserID, log.SubjectRole)
+	}
+	if !log.DCSEnabled || log.CacheLevel != 1 {
+		t.Fatalf("unexpected dcs/cache: %v/%d", log.DCSEnabled, log.CacheLevel)
+	}
+	if log.KMSMS == nil {
+		t.Fatalf("expected kms_ms to be recorded")
+	}
+	if log.DBMS == nil {
+		t.Fatalf("expected db_ms to be recorded")
+	}
+}
+
+func TestFilmService_UpdateTime_Forbidden_DoesNotWritePerfLog(t *testing.T) {
+	repo := &fakeFilmRepo{
+		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+	}
+	perfWriter := &fakePerfWriter{}
+	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 1}
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), &fakeKMS{}, nil, perfWriter, runtime)
+
+	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
+	reqCtx := RequestContext{RequestID: "req-777", ClientIP: "127.0.0.1"}
+
+	_, _, err := svc.UpdateTime(context.Background(), principal, reqCtx, "f1", 240)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected forbidden error, got %v", err)
+	}
+	if perfWriter.calls != 0 {
+		t.Fatalf("expected perf writer not called on forbidden")
 	}
 }

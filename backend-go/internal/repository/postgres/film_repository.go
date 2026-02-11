@@ -128,23 +128,6 @@ func (r *FilmRepository) UpdateTimeCiphertext(ctx context.Context, tenantID, fil
 	return record, nil
 }
 
-// scanFilm scans a film from pgx.Rows
-func scanFilm(rows pgx.Rows) (*domain.Film, error) {
-	var film domain.Film
-	err := rows.Scan(
-		&film.ID,
-		&film.TenantID,
-		&film.Title,
-		&film.TimeElapsedCT,
-		&film.Labels,
-		&film.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &film, nil
-}
-
 // scanFilmRow scans a film from pgx.Row
 func scanFilmRow(row pgx.Row) (*domain.Film, error) {
 	var film domain.Film

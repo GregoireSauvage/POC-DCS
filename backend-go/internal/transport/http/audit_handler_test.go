@@ -56,6 +56,14 @@ func (m *mockPolicyEnforcer) EvaluateAuditRead(
 	return m.auditDecision, m.auditErr
 }
 
+func (m *mockPolicyEnforcer) EvaluatePerfRead(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+) (service.AuthorizationDecision, error) {
+	return service.AuthorizationDecision{Allow: true}, nil
+}
+
 // Implement other PolicyEnforcer methods (not used in audit tests)
 func (m *mockPolicyEnforcer) EvaluateFilmUpdateTime(
 	ctx context.Context,

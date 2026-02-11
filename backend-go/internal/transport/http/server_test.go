@@ -10,11 +10,11 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 )
 
-func newTestServer(t *testing.T) *Server {
-	t.Helper()
-	cfg := &config.Config{
+func testConfig() *config.Config {
+	return &config.Config{
 		Env:             "dev",
 		Service:         "backend-go-test",
 		HTTPAddr:        ":0",
@@ -28,7 +28,11 @@ func newTestServer(t *testing.T) *Server {
 		JWTAudience:     "test-audience",
 		JWTTTLMin:       60,
 	}
-	return NewServer(cfg, slog.Default(), nil) // nil DB for test
+}
+
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	return NewServer(testConfig(), slog.Default(), nil) // nil DB for test
 }
 
 func adminAuthHeader(t *testing.T, s *Server) string {
@@ -142,5 +146,20 @@ func TestServer_DcsToggleAffectsFilmRead(t *testing.T) {
 	}
 	if films[0]["time_elapsed"] == "1***" {
 		t.Fatalf("expected non-masked value when dcs is off")
+	}
+}
+
+func TestServer_PerfServiceNilWhenNoDB(t *testing.T) {
+	s := newTestServer(t)
+	if s.perfService != nil {
+		t.Fatalf("expected perfService nil when no DB")
+	}
+}
+
+func TestServer_PerfServiceWiredWhenDBProvided(t *testing.T) {
+	db := &postgres.Pool{}
+	s := NewServer(testConfig(), slog.Default(), db)
+	if s.perfService == nil {
+		t.Fatalf("expected perfService wired when DB provided")
 	}
 }

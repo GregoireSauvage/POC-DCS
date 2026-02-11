@@ -26,7 +26,10 @@ type FilmReadInput struct {
 }
 
 type FilmReadResult struct {
-	TimeElapsed interface{}
+	TimeElapsed     interface{}
+	FieldsDecrypted []string // Fields that were decrypted for audit logging
+	FieldsMasked    []string // Fields that were masked for audit logging
+	FieldsDenied    []string // Fields that were denied for audit logging
 }
 
 type AuthorizationDecision struct {
@@ -36,6 +39,11 @@ type AuthorizationDecision struct {
 
 type PolicyEnforcer interface {
 	EvaluateAuditRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EvaluatePerfRead(
 		ctx context.Context,
 		principal Principal,
 		reqCtx RequestContext,

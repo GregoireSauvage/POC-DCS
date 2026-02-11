@@ -30,6 +30,9 @@ func NewAuditService(
 
 // WriteAudit writes an audit log entry
 func (s *AuditService) WriteAudit(ctx context.Context, log *domain.AuditLog) error {
+	if s == nil {
+		return nil // Graceful degradation when audit service is nil
+	}
 	if s.repo == nil {
 		s.logger.Warn("audit repository not configured, skipping audit log")
 		return nil

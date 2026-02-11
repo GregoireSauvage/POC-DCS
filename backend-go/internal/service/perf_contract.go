@@ -8,6 +8,8 @@ import (
 
 // PerfService defines perf query operations for HTTP handlers.
 type PerfService interface {
+	Write(ctx context.Context, log *domain.PerfLog) error
+
 	List(
 		ctx context.Context,
 		principal Principal,

@@ -116,7 +116,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("audit logging disabled (no database)")
 	}
 
-	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService)
+	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService, nil, rt)
 
 	// Create JWT service
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
@@ -131,6 +131,16 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("authentication service disabled (no database)")
 	}
 
+	// Create perf service if DB available
+	var perfSvc service.PerfService
+	if db != nil {
+		perfRepo := postgres.NewPerfLogRepository(db)
+		perfSvc = service.NewPerfService(perfRepo, policyEnforcer)
+		logger.Info("performance logging enabled")
+	} else {
+		logger.Warn("performance logging disabled (no database)")
+	}
+
 	mux := nethttp.NewServeMux()
 
 	s := &Server{
@@ -142,6 +152,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		filmFlow:     filmFlow,
 		authService:  authSvc,
 		auditService: auditService,
+		perfService:  perfSvc,
 		jwtService:   jwtSvc,
 		server: &nethttp.Server{
 			Addr:              cfg.HTTPAddr,
