@@ -17,6 +17,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -29,7 +30,9 @@ type Server struct {
 	mux          *nethttp.ServeMux
 	runtime      *runtime.Settings
 	cache        *cache.Manager
+	enforcer     service.PolicyEnforcer
 	filmFlow     *service.FilmService
+	hallService  service.HallService
 	authService  *service.AuthService
 	auditService *service.AuditService
 	perfService  service.PerfService
@@ -90,6 +93,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 				"title":        types.ClassificationPublic,
 				"time_elapsed": types.ClassificationSensitive,
 			},
+			"hall": {
+				"name":            types.ClassificationPublic,
+				"owner_user_id":   types.ClassificationInternal,
+				"current_film_id": types.ClassificationInternal,
+			},
 		},
 	}, pip.Config{
 		Env:            cfg.Env,
@@ -117,6 +125,23 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	}
 
 	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService, nil, rt)
+
+	// Create hall repository (in-memory for now, PostgreSQL later)
+	var hallRepo service.HallRepository
+	if db != nil {
+		logger.Info("using PostgreSQL hall repository (TODO)")
+		// hallRepo = postgres.NewHallRepository(db) // TODO: implement
+		hallRepo = memory.NewHallRepository([]domain.Hall{
+			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
+		})
+	} else {
+		logger.Warn("using in-memory hall repository (for development only)")
+		hallRepo = memory.NewHallRepository([]domain.Hall{
+			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
+		})
+	}
+
+	hallService := service.NewHallService(hallRepo, policyEnforcer, auditService)
 
 	// Create JWT service
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
@@ -149,7 +174,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		mux:          mux,
 		runtime:      rt,
 		cache:        cm,
+		enforcer:     policyEnforcer,
 		filmFlow:     filmFlow,
+		hallService:  hallService,
 		authService:  authSvc,
 		auditService: auditService,
 		perfService:  perfSvc,
@@ -188,6 +215,7 @@ func (s *Server) registerRoutes() {
 	// Protected routes (optional JWT - fallback to X-headers for dev)
 	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
 	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
+	s.mux.Handle("/halls", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleHalls)))
 }
 
 func (s *Server) Start(ctx context.Context) error {

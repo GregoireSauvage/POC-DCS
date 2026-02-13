@@ -59,6 +59,19 @@ func (m *mockPolicyEnforcer) EvaluateAuditRead(ctx context.Context, principal Pr
 	return AuthorizationDecision{}, errors.New("not implemented")
 }
 
+// Hall policy stubs (not used in perf tests)
+func (m *mockPolicyEnforcer) EvaluateHallCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (m *mockPolicyEnforcer) EvaluateHallRead(ctx context.Context, principal Principal, reqCtx RequestContext, hallID string, ownerUserID string) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (m *mockPolicyEnforcer) EnforceHallRead(ctx context.Context, principal Principal, reqCtx RequestContext, hall HallReadInput) (HallReadResult, error) {
+	return HallReadResult{}, errors.New("not implemented")
+}
+
 func (m *mockPerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) error {
 	_ = ctx
 	m.createCalls++

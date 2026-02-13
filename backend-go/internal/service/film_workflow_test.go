@@ -120,6 +120,35 @@ func (f *fakePolicyEnforcer) EnforceFilmRead(
 	return f.readFunc(ctx, principal, reqCtx, film)
 }
 
+// Hall policy stubs (not used in film tests)
+func (f *fakePolicyEnforcer) EvaluateHallCreate(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	ownerUserID string,
+) (AuthorizationDecision, error) {
+	return AuthorizationDecision{Allow: true, Reason: "test"}, nil
+}
+
+func (f *fakePolicyEnforcer) EvaluateHallRead(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	hallID string,
+	ownerUserID string,
+) (AuthorizationDecision, error) {
+	return AuthorizationDecision{Allow: true, Reason: "test"}, nil
+}
+
+func (f *fakePolicyEnforcer) EnforceHallRead(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	hall HallReadInput,
+) (HallReadResult, error) {
+	return HallReadResult{}, nil
+}
+
 type fakePerfWriter struct {
 	calls   int
 	lastLog *domain.PerfLog

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 	nethttp "net/http"
 	"strconv"
@@ -10,10 +11,17 @@ import (
 )
 
 func (s *Server) handleFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
-	if r.Method != nethttp.MethodGet {
+	switch r.Method {
+	case nethttp.MethodGet:
+		s.handleListFilms(w, r)
+	case nethttp.MethodPost:
+		s.handleCreateFilm(w, r)
+	default:
 		w.WriteHeader(nethttp.StatusMethodNotAllowed)
-		return
 	}
+}
+
+func (s *Server) handleListFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
 	principal := principalFromRequest(r)
 	reqCtx := requestContextFromRequest(r, s.cfg.Env)
 
@@ -57,6 +65,58 @@ func (s *Server) handleFilmSubroutes(w nethttp.ResponseWriter, r *nethttp.Reques
 		}
 		return
 	}
+	setPerfHeaders(w, pctx)
+	writeJSON(w, nethttp.StatusOK, film)
+}
+
+type filmCreateRequest struct {
+	Title       string `json:"title"`
+	TimeElapsed int    `json:"time_elapsed"`
+}
+
+func (s *Server) handleCreateFilm(w nethttp.ResponseWriter, r *nethttp.Request) {
+	// 1. Method check
+	if r.Method != nethttp.MethodPost {
+		w.WriteHeader(nethttp.StatusMethodNotAllowed)
+		return
+	}
+
+	// 2. Parse request body
+	var req filmCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, nethttp.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	// 3. Validate required fields
+	if strings.TrimSpace(req.Title) == "" {
+		writeError(w, nethttp.StatusBadRequest, "title is required")
+		return
+	}
+	if req.TimeElapsed < 0 {
+		writeError(w, nethttp.StatusBadRequest, "time_elapsed must be non-negative")
+		return
+	}
+
+	// 4. Extract principal and request context
+	principal := principalFromRequest(r)
+	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+
+	// 5. Call service
+	film, pctx, err := s.filmFlow.Create(r.Context(), principal, reqCtx, service.FilmCreateInput{
+		Title:       strings.TrimSpace(req.Title),
+		TimeElapsed: req.TimeElapsed,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			writeError(w, nethttp.StatusForbidden, "forbidden")
+		} else {
+			writeError(w, nethttp.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	// 6. Return response with perf headers
 	setPerfHeaders(w, pctx)
 	writeJSON(w, nethttp.StatusOK, film)
 }

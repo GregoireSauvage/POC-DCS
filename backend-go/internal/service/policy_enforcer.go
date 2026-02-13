@@ -71,4 +71,25 @@ type PolicyEnforcer interface {
 		reqCtx RequestContext,
 		film FilmReadInput,
 	) (FilmReadResult, error)
+
+	// Hall policies
+	EvaluateHallCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EvaluateHallRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		hallID string,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EnforceHallRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		hall HallReadInput,
+	) (HallReadResult, error)
 }

@@ -91,6 +91,35 @@ func (m *mockPolicyEnforcer) EnforceFilmRead(
 	return service.FilmReadResult{}, nil
 }
 
+// Hall policy stubs (not used in audit tests)
+func (m *mockPolicyEnforcer) EvaluateHallCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	ownerUserID string,
+) (service.AuthorizationDecision, error) {
+	return service.AuthorizationDecision{Allow: true}, nil
+}
+
+func (m *mockPolicyEnforcer) EvaluateHallRead(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	hallID string,
+	ownerUserID string,
+) (service.AuthorizationDecision, error) {
+	return service.AuthorizationDecision{Allow: true}, nil
+}
+
+func (m *mockPolicyEnforcer) EnforceHallRead(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	hall service.HallReadInput,
+) (service.HallReadResult, error) {
+	return service.HallReadResult{}, nil
+}
+
 func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enforcer *mockPolicyEnforcer) (*Server, string, *mockAuditLogRepository) {
 	t.Helper()
 	cfg := &config.Config{
