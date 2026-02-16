@@ -184,13 +184,15 @@ func scanPerfLog(row pgx.Row) (*domain.PerfLog, error) {
 	var pdpMS *float64
 	var kmsMS *float64
 	var dbMS *float64
+	var subjectUserID pgtype.UUID
+	var subjectRole *string
 
 	err := row.Scan(
 		&log.Timestamp,
 		&log.RequestID,
 		&log.TenantID,
-		&log.SubjectUserID,
-		&log.SubjectRole,
+		&subjectUserID,
+		&subjectRole,
 		&log.Action,
 		&log.ResourceType,
 		&log.DCSEnabled,
@@ -203,6 +205,16 @@ func scanPerfLog(row pgx.Row) (*domain.PerfLog, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if subjectUserID.Status == pgtype.Present {
+		var id string
+		if err := subjectUserID.AssignTo(&id); err == nil {
+			log.SubjectUserID = id
+		}
+	}
+	if subjectRole != nil {
+		log.SubjectRole = *subjectRole
 	}
 
 	log.PIPMS = pipMS

@@ -1,9 +1,30 @@
-import { describe, it, expect } from 'vitest';
-import { API_BASE, ApiError } from './client';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { API_BASE_KEY, ApiError, getApiBase, setApiBase } from './client';
 
 describe('client', () => {
-  it('should have default API_BASE', () => {
-    expect(API_BASE).toBe('/api');
+  beforeEach(() => {
+    localStorage.removeItem(API_BASE_KEY);
+  });
+
+  it('should have default API base', () => {
+    expect(getApiBase()).toBe('/api');
+  });
+
+  it('should read API base from localStorage override', () => {
+    localStorage.setItem(API_BASE_KEY, '/api-go');
+    expect(getApiBase()).toBe('/api-go');
+  });
+
+  it('should fall back to default for invalid API base', () => {
+    localStorage.setItem(API_BASE_KEY, 'http://example.com');
+    expect(getApiBase()).toBe('/api');
+  });
+
+  it('should normalize via setApiBase', () => {
+    expect(setApiBase('/api-go')).toBe('/api-go');
+    expect(getApiBase()).toBe('/api-go');
+    expect(setApiBase('invalid')).toBe('/api');
+    expect(getApiBase()).toBe('/api');
   });
 
   it('should create ApiError with status and body', () => {

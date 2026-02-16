@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v4"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
@@ -28,6 +29,20 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 		log.Timestamp = time.Now().UTC()
 	}
 
+	subjectUserID := nullableUUID(log.SubjectUserID)
+	subjectRole := nullableString(log.SubjectRole)
+	resourceID := nullableUUID(log.ResourceID)
+	decisionHash := nullableString(log.DecisionHash)
+	if log.FieldsDecrypted == nil {
+		log.FieldsDecrypted = []string{}
+	}
+	if log.FieldsMasked == nil {
+		log.FieldsMasked = []string{}
+	}
+	if log.FieldsDenied == nil {
+		log.FieldsDenied = []string{}
+	}
+
 	// Convert details map to JSON
 	var detailsJSON []byte
 	var err error
@@ -36,11 +51,13 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 		if err != nil {
 			return fmt.Errorf("failed to marshal details: %w", err)
 		}
+	} else {
+		detailsJSON = []byte("{}")
 	}
 
 	query := `
 		INSERT INTO audit_logs (
-			timestamp, request_id, tenant_id,
+			ts, request_id, tenant_id,
 			subject_user_id, subject_role,
 			action, resource_type, resource_id,
 			outcome, decision_hash,
@@ -61,13 +78,13 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 		log.Timestamp,
 		log.RequestID,
 		log.TenantID,
-		log.SubjectUserID,
-		log.SubjectRole,
+		subjectUserID,
+		subjectRole,
 		log.Action,
 		log.ResourceType,
-		log.ResourceID,
+		resourceID,
 		log.Outcome,
-		log.DecisionHash,
+		decisionHash,
 		log.FieldsDecrypted,
 		log.FieldsMasked,
 		log.FieldsDenied,
@@ -89,7 +106,7 @@ func (r *AuditLogRepository) List(ctx context.Context, tenantID string, limit in
 
 	query := `
 		SELECT
-			id, timestamp, request_id, tenant_id,
+			id, ts, request_id, tenant_id,
 			subject_user_id, subject_role,
 			action, resource_type, resource_id,
 			outcome, decision_hash,
@@ -97,7 +114,7 @@ func (r *AuditLogRepository) List(ctx context.Context, tenantID string, limit in
 			details
 		FROM audit_logs
 		WHERE tenant_id = $1
-		ORDER BY timestamp DESC
+		ORDER BY ts DESC
 		LIMIT $2
 	`
 
@@ -127,19 +144,23 @@ func (r *AuditLogRepository) List(ctx context.Context, tenantID string, limit in
 func scanAuditLog(rows pgx.Rows) (*domain.AuditLog, error) {
 	var log domain.AuditLog
 	var detailsJSON []byte
+	var subjectUserID pgtype.UUID
+	var resourceID pgtype.UUID
+	var subjectRole *string
+	var decisionHash *string
 
 	err := rows.Scan(
 		&log.ID,
 		&log.Timestamp,
 		&log.RequestID,
 		&log.TenantID,
-		&log.SubjectUserID,
-		&log.SubjectRole,
+		&subjectUserID,
+		&subjectRole,
 		&log.Action,
 		&log.ResourceType,
-		&log.ResourceID,
+		&resourceID,
 		&log.Outcome,
-		&log.DecisionHash,
+		&decisionHash,
 		&log.FieldsDecrypted,
 		&log.FieldsMasked,
 		&log.FieldsDenied,
@@ -148,6 +169,25 @@ func scanAuditLog(rows pgx.Rows) (*domain.AuditLog, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	if subjectUserID.Status == pgtype.Present {
+		var id string
+		if err := subjectUserID.AssignTo(&id); err == nil {
+			log.SubjectUserID = id
+		}
+	}
+	if subjectRole != nil {
+		log.SubjectRole = *subjectRole
+	}
+	if resourceID.Status == pgtype.Present {
+		var id string
+		if err := resourceID.AssignTo(&id); err == nil {
+			log.ResourceID = id
+		}
+	}
+	if decisionHash != nil {
+		log.DecisionHash = *decisionHash
 	}
 
 	// Unmarshal details JSON

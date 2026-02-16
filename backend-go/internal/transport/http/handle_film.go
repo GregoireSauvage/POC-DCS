@@ -35,6 +35,11 @@ func (s *Server) handleListFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
 }
 
 func (s *Server) handleFilmSubroutes(w nethttp.ResponseWriter, r *nethttp.Request) {
+	// Allow /films/ to behave like /films for GET/POST (frontend uses trailing slash)
+	if r.URL.Path == "/films/" || r.URL.Path == "/films" {
+		s.handleFilms(w, r)
+		return
+	}
 	if r.Method != nethttp.MethodPatch {
 		w.WriteHeader(nethttp.StatusMethodNotAllowed)
 		return

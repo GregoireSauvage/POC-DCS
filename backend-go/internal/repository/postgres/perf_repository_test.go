@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgtype"
 )
 
 type fakeRow struct {
@@ -67,6 +69,40 @@ func assignValue(dest interface{}, val interface{}) error {
 		}
 		v := val.(float64)
 		*d = &v
+	case **string:
+		if val == nil {
+			*d = nil
+			return nil
+		}
+		v := val.(string)
+		*d = &v
+	case *pgtype.UUID:
+		if val == nil {
+			d.Status = pgtype.Null
+			return nil
+		}
+		switch v := val.(type) {
+		case pgtype.UUID:
+			*d = v
+		case *pgtype.UUID:
+			if v == nil {
+				d.Status = pgtype.Null
+				return nil
+			}
+			*d = *v
+		case uuid.UUID:
+			d.Bytes = v
+			d.Status = pgtype.Present
+		case string:
+			parsed, err := uuid.Parse(v)
+			if err != nil {
+				return err
+			}
+			d.Bytes = parsed
+			d.Status = pgtype.Present
+		default:
+			return fmt.Errorf("unsupported pgtype.UUID value %T", val)
+		}
 	default:
 		return fmt.Errorf("unsupported dest type %T", dest)
 	}
@@ -79,13 +115,14 @@ func TestScanPerfLog_AllFields(t *testing.T) {
 	pdp := 2.2
 	kms := 3.3
 	db := 4.4
+	subjectID := uuid.New()
 
 	row := fakeRow{
 		values: []interface{}{
 			ts,
 			"req-1",
 			"t1",
-			"u1",
+			subjectID,
 			"admin",
 			"film.read",
 			"film",
@@ -122,13 +159,14 @@ func TestScanPerfLog_AllFields(t *testing.T) {
 
 func TestScanPerfLog_NullOptionalFields(t *testing.T) {
 	ts := time.Now().UTC()
+	subjectID := uuid.New()
 
 	row := fakeRow{
 		values: []interface{}{
 			ts,
 			"req-2",
 			"t1",
-			"u2",
+			subjectID,
 			"admin",
 			"film.update",
 			"film",

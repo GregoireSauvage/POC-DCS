@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // User represents a user in the system
 type User struct {
@@ -9,6 +12,6 @@ type User struct {
 	Username     string                 `json:"username"`
 	PasswordHash string                 `json:"-"` // Never expose password hash
 	Role         string                 `json:"role"`
-	Labels       map[string]interface{} `json:"labels,omitempty"`
+	Labels       json.RawMessage        `json:"labels,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
 }
