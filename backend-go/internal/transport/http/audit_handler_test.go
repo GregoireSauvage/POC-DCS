@@ -120,6 +120,33 @@ func (m *mockPolicyEnforcer) EnforceHallRead(
 	return service.HallReadResult{}, nil
 }
 
+// Spectator policy stubs (not used in audit tests)
+func (m *mockPolicyEnforcer) EvaluateSpectatorCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	ownerUserID string,
+) (service.AuthorizationDecision, error) {
+	return service.AuthorizationDecision{Allow: true}, nil
+}
+
+func (m *mockPolicyEnforcer) EvaluateSpectatorSearch(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+) (service.AuthorizationDecision, error) {
+	return service.AuthorizationDecision{Allow: true}, nil
+}
+
+func (m *mockPolicyEnforcer) EnforceSpectatorRead(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	spectator service.SpectatorReadInput,
+) (service.SpectatorReadResult, error) {
+	return service.SpectatorReadResult{}, nil
+}
+
 func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enforcer *mockPolicyEnforcer) (*Server, string, *mockAuditLogRepository) {
 	t.Helper()
 	cfg := &config.Config{

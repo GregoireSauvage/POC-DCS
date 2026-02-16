@@ -346,6 +346,21 @@ func (f *fakeHallRepo) CountSpectators(_ context.Context, tenantID, hallID strin
 	return f.spectatorCounts[hallID], nil
 }
 
+func (f *fakeHallRepo) FindByID(_ context.Context, tenantID string, hallID string) (*domain.Hall, error) {
+	for _, h := range f.halls {
+		if h.TenantID == tenantID && h.ID == hallID {
+			return &domain.Hall{
+				TenantID:      h.TenantID,
+				ID:            h.ID,
+				Name:          h.Name,
+				OwnerUserID:   h.OwnerUserID,
+				CurrentFilmID: h.CurrentFilmID,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
 type fakeHallEnforcer struct {
 	createDecision AuthorizationDecision
 	createErr      error
@@ -384,6 +399,19 @@ func (f *fakeHallEnforcer) EvaluateFilmUpdateTime(_ context.Context, _ Principal
 
 func (f *fakeHallEnforcer) EnforceFilmRead(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 	return FilmReadResult{}, errors.New("not implemented")
+}
+
+// Spectator policy stubs (not used in hall tests)
+func (f *fakeHallEnforcer) EvaluateSpectatorCreate(_ context.Context, _ Principal, _ RequestContext, _ string) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (f *fakeHallEnforcer) EvaluateSpectatorSearch(_ context.Context, _ Principal, _ RequestContext) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (f *fakeHallEnforcer) EnforceSpectatorRead(_ context.Context, _ Principal, _ RequestContext, _ SpectatorReadInput) (SpectatorReadResult, error) {
+	return SpectatorReadResult{}, errors.New("not implemented")
 }
 
 // Helper

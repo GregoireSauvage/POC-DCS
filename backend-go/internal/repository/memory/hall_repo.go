@@ -72,3 +72,18 @@ func (r *HallRepository) SetSpectatorCount(hallID string, count int) {
 	defer r.mu.Unlock()
 	r.spectatorCounts[hallID] = count
 }
+
+// FindByID finds a hall by tenant ID and hall ID
+func (r *HallRepository) FindByID(ctx context.Context, tenantID string, hallID string) (*domain.Hall, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, h := range r.halls {
+		if h.TenantID == tenantID && h.ID == hallID {
+			// Return a copy to avoid mutation
+			hall := h
+			return &hall, nil
+		}
+	}
+	return nil, nil
+}

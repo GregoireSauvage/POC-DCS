@@ -72,6 +72,19 @@ func (m *mockPolicyEnforcer) EnforceHallRead(ctx context.Context, principal Prin
 	return HallReadResult{}, errors.New("not implemented")
 }
 
+// Spectator policy stubs (not used in perf tests)
+func (m *mockPolicyEnforcer) EvaluateSpectatorCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (m *mockPolicyEnforcer) EvaluateSpectatorSearch(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
+	return AuthorizationDecision{}, errors.New("not implemented")
+}
+
+func (m *mockPolicyEnforcer) EnforceSpectatorRead(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error) {
+	return SpectatorReadResult{}, errors.New("not implemented")
+}
+
 func (m *mockPerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) error {
 	_ = ctx
 	m.createCalls++

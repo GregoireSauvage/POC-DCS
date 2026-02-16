@@ -54,6 +54,7 @@ type HallRepository interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]HallRecord, error)
 	Create(ctx context.Context, hall *domain.Hall) error
 	CountSpectators(ctx context.Context, tenantID string, hallID string) (int, error)
+	FindByID(ctx context.Context, tenantID string, hallID string) (*domain.Hall, error)
 }
 
 // HallService defines hall business operations

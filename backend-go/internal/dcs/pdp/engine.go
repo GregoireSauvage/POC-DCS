@@ -97,10 +97,10 @@ func decide(input types.PolicyInput) types.Decision {
 	allow := false
 	reason := "default_deny"
 	switch input.Action {
-	case "film.read", "hall.read", "spectator.read", "search.spectator":
+	case "film.read", "hall.read", "spectator.read":
 		allow = true
 		reason = "read_allowed"
-	case "film.create", "hall.create", "spectator.create", "film.update_time":
+	case "film.create", "hall.create", "spectator.create", "film.update_time", "search.spectator":
 		allow = input.Principal.Role == "agent" || input.Principal.Role == "admin"
 		if allow {
 			reason = "write_allowed"

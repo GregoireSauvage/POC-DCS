@@ -92,4 +92,23 @@ type PolicyEnforcer interface {
 		reqCtx RequestContext,
 		hall HallReadInput,
 	) (HallReadResult, error)
+
+	// Spectator policies
+	EvaluateSpectatorCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EvaluateSpectatorSearch(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EnforceSpectatorRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		spectator SpectatorReadInput,
+	) (SpectatorReadResult, error)
 }

@@ -63,10 +63,17 @@ func (f *fakeKMS) Decrypt(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 
-type fakePolicyEnforcer struct {
-	evaluateFunc       func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
-	evaluateCreateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
-	readFunc           func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
+func (f *fakeKMS) GetPepper(_ context.Context, _ string) ([]byte, error) {
+	return []byte("default-pepper"), nil
+}
+
+type fakePolicyEnforcer struct{
+	evaluateFunc                func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
+	evaluateCreateFunc          func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
+	readFunc                    func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
+	evaluateSpectatorCreateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error)
+	evaluateSpectatorSearchFunc func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
+	enforceSpectatorReadFunc    func(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error)
 }
 
 func (f *fakePolicyEnforcer) EvaluateAuditRead(
@@ -147,6 +154,42 @@ func (f *fakePolicyEnforcer) EnforceHallRead(
 	hall HallReadInput,
 ) (HallReadResult, error) {
 	return HallReadResult{}, nil
+}
+
+// Spectator policy stubs
+func (f *fakePolicyEnforcer) EvaluateSpectatorCreate(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	ownerUserID string,
+) (AuthorizationDecision, error) {
+	if f.evaluateSpectatorCreateFunc != nil {
+		return f.evaluateSpectatorCreateFunc(ctx, principal, reqCtx, ownerUserID)
+	}
+	return AuthorizationDecision{Allow: true, Reason: "test"}, nil
+}
+
+func (f *fakePolicyEnforcer) EvaluateSpectatorSearch(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+) (AuthorizationDecision, error) {
+	if f.evaluateSpectatorSearchFunc != nil {
+		return f.evaluateSpectatorSearchFunc(ctx, principal, reqCtx)
+	}
+	return AuthorizationDecision{Allow: true, Reason: "test"}, nil
+}
+
+func (f *fakePolicyEnforcer) EnforceSpectatorRead(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	spectator SpectatorReadInput,
+) (SpectatorReadResult, error) {
+	if f.enforceSpectatorReadFunc != nil {
+		return f.enforceSpectatorReadFunc(ctx, principal, reqCtx, spectator)
+	}
+	return SpectatorReadResult{}, nil
 }
 
 type fakePerfWriter struct {

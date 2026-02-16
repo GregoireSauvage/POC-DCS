@@ -24,19 +24,20 @@ import (
 )
 
 type Server struct {
-	cfg          *config.Config
-	logger       *slog.Logger
-	server       *nethttp.Server
-	mux          *nethttp.ServeMux
-	runtime      *runtime.Settings
-	cache        *cache.Manager
-	enforcer     service.PolicyEnforcer
-	filmFlow     *service.FilmService
-	hallService  service.HallService
-	authService  *service.AuthService
-	auditService *service.AuditService
-	perfService  service.PerfService
-	jwtService   *auth.JWTService
+	cfg              *config.Config
+	logger           *slog.Logger
+	server           *nethttp.Server
+	mux              *nethttp.ServeMux
+	runtime          *runtime.Settings
+	cache            *cache.Manager
+	enforcer         service.PolicyEnforcer
+	filmFlow         *service.FilmService
+	hallService      service.HallService
+	spectatorService *service.SpectatorService
+	authService      *service.AuthService
+	auditService     *service.AuditService
+	perfService      service.PerfService
+	jwtService       *auth.JWTService
 }
 
 func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
@@ -98,6 +99,11 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 				"owner_user_id":   types.ClassificationInternal,
 				"current_film_id": types.ClassificationInternal,
 			},
+			"spectator": {
+				"name":        types.ClassificationPII,
+				"age":         types.ClassificationSensitive,
+				"external_id": types.ClassificationPII,
+			},
 		},
 	}, pip.Config{
 		Env:            cfg.Env,
@@ -107,8 +113,9 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		ClientIPHeader: "x-real-ip",
 	})
 	engine := pdp.NewEngine(rt, cm)
-	applier := pep.NewFilmApplier(rt, kmsClient)
-	policyEnforcer := enforcer.New(provider, engine, applier)
+	filmApplier := pep.NewFilmApplier(rt, kmsClient)
+	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
+	policyEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, kmsClient)
 
 	// Create audit service if DB available
 	var auditService *service.AuditService
@@ -143,6 +150,18 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 
 	hallService := service.NewHallService(hallRepo, policyEnforcer, auditService)
 
+	// Create spectator repository (in-memory for now)
+	spectatorRepo := memory.NewSpectatorRepository()
+	spectatorService := service.NewSpectatorService(
+		spectatorRepo,
+		hallRepo,
+		kmsClient,
+		policyEnforcer,
+		auditService,
+		nil, // perf writer - will be set later
+		rt,
+	)
+
 	// Create JWT service
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 
@@ -169,18 +188,19 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	mux := nethttp.NewServeMux()
 
 	s := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		mux:          mux,
-		runtime:      rt,
-		cache:        cm,
-		enforcer:     policyEnforcer,
-		filmFlow:     filmFlow,
-		hallService:  hallService,
-		authService:  authSvc,
-		auditService: auditService,
-		perfService:  perfSvc,
-		jwtService:   jwtSvc,
+		cfg:              cfg,
+		logger:           logger,
+		mux:              mux,
+		runtime:          rt,
+		cache:            cm,
+		enforcer:         policyEnforcer,
+		filmFlow:         filmFlow,
+		hallService:      hallService,
+		spectatorService: spectatorService,
+		authService:      authSvc,
+		auditService:     auditService,
+		perfService:      perfSvc,
+		jwtService:       jwtSvc,
 		server: &nethttp.Server{
 			Addr:              cfg.HTTPAddr,
 			Handler:           mux,
@@ -216,6 +236,8 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
 	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
 	s.mux.Handle("/halls", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleHalls)))
+	s.mux.Handle("/spectators", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleSpectators)))
+	s.mux.Handle("/spectators/search", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleSearchSpectators)))
 }
 
 func (s *Server) Start(ctx context.Context) error {

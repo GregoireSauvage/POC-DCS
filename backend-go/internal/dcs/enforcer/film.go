@@ -12,16 +12,20 @@ import (
 )
 
 type DcsEnforcer struct {
-	pip         *pip.Provider
-	pdp         *pdp.Engine
-	filmApplier *pep.FilmApplier
+	pip              *pip.Provider
+	pdp              *pdp.Engine
+	filmApplier      *pep.FilmApplier
+	spectatorApplier *pep.SpectatorApplier
+	kms              pep.Decryptor // For creating appliers on-the-fly
 }
 
-func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.FilmApplier) *DcsEnforcer {
+func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.FilmApplier, spectatorApplier *pep.SpectatorApplier, kms pep.Decryptor) *DcsEnforcer {
 	return &DcsEnforcer{
-		pip:         pipProvider,
-		pdp:         pdpEngine,
-		filmApplier: filmApplier,
+		pip:              pipProvider,
+		pdp:              pdpEngine,
+		filmApplier:      filmApplier,
+		spectatorApplier: spectatorApplier,
+		kms:              kms,
 	}
 }
 

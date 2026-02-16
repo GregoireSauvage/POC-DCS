@@ -60,8 +60,9 @@ func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.Classification
 		ClientIPHeader: "x-real-ip",
 	})
 	engine := pdp.NewEngine(rt, cm)
-	applier := pep.NewFilmApplier(rt, decryptor)
-	return New(provider, engine, applier)
+	filmApplier := pep.NewFilmApplier(rt, decryptor)
+	spectatorApplier := pep.NewSpectatorApplier(decryptor)
+	return New(provider, engine, filmApplier, spectatorApplier, decryptor)
 }
 
 func defaultFilmStore() pip.ClassificationStore {
