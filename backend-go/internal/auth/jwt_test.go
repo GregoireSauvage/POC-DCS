@@ -18,7 +18,7 @@ func TestJWTService_GenerateToken(t *testing.T) {
 		Scopes:   []string{"read"},
 	}
 
-	token, err := svc.GenerateToken(principal, "read")
+	token, err := svc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestJWTService_ValidateToken(t *testing.T) {
 		Scopes:   []string{"read"},
 	}
 
-	token, err := svc.GenerateToken(principal, "read")
+	token, err := svc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -69,8 +69,8 @@ func TestJWTService_ValidateToken(t *testing.T) {
 	if claims.Role != "developer" {
 		t.Errorf("Expected Role developer, got %s", claims.Role)
 	}
-	if claims.Scopes != "read" {
-		t.Errorf("Expected Scopes read, got %s", claims.Scopes)
+	if len(claims.Scopes) != 1 || claims.Scopes[0] != "read" {
+		t.Errorf("Expected Scopes [read], got %v", claims.Scopes)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestJWTService_ValidateToken_WrongSecret(t *testing.T) {
 	}
 
 	// Generate with secret-1
-	token, err := svc1.GenerateToken(principal, "read")
+	token, err := svc1.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestJWTService_ValidateToken_WrongAudience(t *testing.T) {
 		Scopes:   []string{"read"},
 	}
 
-	token, err := svc.GenerateToken(principal, "read")
+	token, err := svc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestJWTService_ClaimsToPrincipal(t *testing.T) {
 		TenantID: "t1",
 		Username: "alice",
 		Role:     "admin",
-		Scopes:   "read write audit",
+		Scopes:   []string{"*"}, // Admin scopes as array for Python parity
 	}
 
 	principal := svc.ClaimsToPrincipal(claims)
@@ -188,7 +188,7 @@ func TestJWTService_TokenExpiration(t *testing.T) {
 		Scopes:   []string{"read"},
 	}
 
-	token, err := svc.GenerateToken(principal, "read")
+	token, err := svc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -202,5 +202,66 @@ func TestJWTService_TokenExpiration(t *testing.T) {
 	// But at least we verify the token was created
 	if token == "" {
 		t.Error("Token generation failed")
+	}
+}
+
+// TestJWTService_ScopesArrayParity tests that scopes are stored as []string for Python parity
+func TestJWTService_ScopesArrayParity(t *testing.T) {
+	svc := NewJWTService("test-secret", "test-issuer", "test-audience", 60)
+
+	tests := []struct {
+		name           string
+		role           string
+		expectedScopes []string
+	}{
+		{"admin has multiple scopes", "admin", []string{"*"}},
+		{"agent has cinema scope", "agent", []string{"cinema"}},
+		{"developer has cinema scope", "developer", []string{"cinema"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			principal := types.Principal{
+				UserID:   "user-123",
+				TenantID: "t1",
+				Username: "testuser",
+				Role:     tt.role,
+				Scopes:   tt.expectedScopes,
+			}
+
+			// Generate token
+			token, err := svc.GenerateToken(principal)
+			if err != nil {
+				t.Fatalf("GenerateToken failed: %v", err)
+			}
+
+			// Validate and extract claims
+			claims, err := svc.ValidateToken(token)
+			if err != nil {
+				t.Fatalf("ValidateToken failed: %v", err)
+			}
+
+			// Scopes should be []string type, not string
+			if len(claims.Scopes) == 0 {
+				t.Error("Expected non-empty scopes array")
+			}
+
+			// Verify scopes match expected
+			if len(claims.Scopes) != len(tt.expectedScopes) {
+				t.Errorf("Expected %d scopes, got %d", len(tt.expectedScopes), len(claims.Scopes))
+			}
+
+			for i, scope := range tt.expectedScopes {
+				if i >= len(claims.Scopes) || claims.Scopes[i] != scope {
+					t.Errorf("Expected scope[%d]=%s, got %v", i, scope, claims.Scopes)
+				}
+			}
+
+			// Convert to Principal and verify
+			convertedPrincipal := svc.ClaimsToPrincipal(claims)
+			if len(convertedPrincipal.Scopes) != len(tt.expectedScopes) {
+				t.Errorf("ClaimsToPrincipal: Expected %d scopes, got %d", len(tt.expectedScopes), len(convertedPrincipal.Scopes))
+			}
+		})
 	}
 }

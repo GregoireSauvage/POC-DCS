@@ -70,17 +70,16 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 		return nil, ErrInvalidCredentials
 	}
 
-	// Generate JWT token
+	// Generate JWT token with Python-compatible scopes
 	principal := types.Principal{
 		UserID:   user.ID,
 		TenantID: user.TenantID,
 		Username: user.Username,
 		Role:     user.Role,
-		Scopes:   []string{roleToScopes(user.Role)},
+		Scopes:   roleToScopesArray(user.Role), // Return []string for Python parity
 	}
 
-	scopesStr := roleToScopes(user.Role)
-	token, err := s.jwtSvc.GenerateToken(principal, scopesStr)
+	token, err := s.jwtSvc.GenerateToken(principal)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -96,16 +95,15 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 	}, nil
 }
 
-// roleToScopes converts a role to scopes (same logic as Python backend)
-func roleToScopes(role string) string {
+// roleToScopesArray converts a role to scopes array (Python parity)
+// Python uses: ["*"] for admin, ["cinema"] for agent/developer
+func roleToScopesArray(role string) []string {
 	switch role {
 	case "admin":
-		return "read write bootstrap audit"
-	case "agent":
-		return "read write"
-	case "developer":
-		return "read"
+		return []string{"*"}
+	case "agent", "developer":
+		return []string{"cinema"}
 	default:
-		return ""
+		return []string{}
 	}
 }

@@ -191,7 +191,8 @@ func generateNonAdminToken(t *testing.T, s *Server, role string) string {
 			TenantID: "test-tenant",
 			Username: "testuser",
 			Role:     role,
-		}, "")
+			Scopes:   []string{"cinema"},
+		})
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
@@ -604,7 +605,8 @@ func TestAudit_TenantIsolation(t *testing.T) {
 			TenantID: "tenant-1",
 			Username: "admin1",
 			Role:     "admin",
-		}, "")
+			Scopes:   []string{"*"},
+		})
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
@@ -701,7 +703,8 @@ func TestAudit_DCS_CalledWithCorrectParams(t *testing.T) {
 			TenantID: "tenant-test",
 			Username: "testadmin",
 			Role:     "admin",
-		}, "")
+			Scopes:   []string{"*"},
+		})
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}

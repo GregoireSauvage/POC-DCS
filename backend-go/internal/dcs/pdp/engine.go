@@ -107,7 +107,7 @@ func decide(input types.PolicyInput) types.Decision {
 		} else {
 			reason = "write_forbidden"
 		}
-	case "audit.read":
+	case "audit.read", "perf.read":
 		allow = input.Principal.Role == "admin"
 		if allow {
 			reason = "audit_allowed"

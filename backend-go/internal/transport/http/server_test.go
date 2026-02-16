@@ -43,7 +43,7 @@ func adminAuthHeader(t *testing.T, s *Server) string {
 			TenantID: "t1",
 			Username: "admin",
 			Role:     "admin",
-		}, "")
+		})
 	if err != nil {
 		t.Fatalf("failed to generate admin token: %v", err)
 	}

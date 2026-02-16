@@ -41,8 +41,9 @@ func generateToken(t *testing.T, jwtSvc *auth.JWTService, role string) string {
 		TenantID: "test-tenant",
 		Username: "testuser",
 		Role:     role,
+		Scopes:   []string{"*"}, // Admin/test scopes
 	}
-	token, err := jwtSvc.GenerateToken(principal, "")
+	token, err := jwtSvc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}

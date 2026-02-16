@@ -23,7 +23,7 @@ func principalFromRequest(r *nethttp.Request) service.Principal {
 			UserID:   claims.UserID,
 			Username: claims.Username,
 			Role:     claims.Role,
-			Scopes:   parseScopes(claims.Scopes),
+			Scopes:   claims.Scopes, // Scopes are already []string, use directly
 		}
 	}
 
@@ -33,16 +33,8 @@ func principalFromRequest(r *nethttp.Request) service.Principal {
 		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
 		Username: readHeaderOrDefault(r, "X-Username", "dev"),
 		Role:     readHeaderOrDefault(r, "X-Role", "developer"),
+		Scopes:   []string{"cinema"}, // Default scope for dev/testing
 	}
-}
-
-func parseScopes(scopesStr string) []string {
-	if scopesStr == "" {
-		return nil
-	}
-	// For now, return as single-element array
-	// In future, could split by space: strings.Fields(scopesStr)
-	return []string{scopesStr}
 }
 
 func requestContextFromRequest(r *nethttp.Request, env string) service.RequestContext {

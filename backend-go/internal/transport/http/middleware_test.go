@@ -20,8 +20,9 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 		TenantID: "t1",
 		Username: "alice",
 		Role:     "developer",
+		Scopes:   []string{"cinema"},
 	}
-	token, err := jwtSvc.GenerateToken(principal, "read")
+	token, err := jwtSvc.GenerateToken(principal)
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
@@ -155,8 +156,9 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 		TenantID: "t1",
 		Username: "alice",
 		Role:     "developer",
+		Scopes:   []string{"cinema"},
 	}
-	token, _ := jwtSvc.GenerateToken(principal, "read")
+	token, _ := jwtSvc.GenerateToken(principal)
 
 	server := &Server{
 		jwtService: jwtSvc,

@@ -11,11 +11,11 @@ import (
 
 // JWTClaims represents the JWT token claims
 type JWTClaims struct {
-	UserID   string `json:"sub"`
-	TenantID string `json:"tenant_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	Scopes   string `json:"scopes,omitempty"`
+	UserID   string   `json:"sub"`
+	TenantID string   `json:"tenant_id"`
+	Username string   `json:"username"`
+	Role     string   `json:"role"`
+	Scopes   []string `json:"scopes,omitempty"` // Changed to []string for Python parity
 	jwt.RegisteredClaims
 }
 
@@ -38,14 +38,14 @@ func NewJWTService(secret, issuer, audience string, ttlMinutes int) *JWTService 
 }
 
 // GenerateToken creates a new JWT token for a user
-func (j *JWTService) GenerateToken(principal types.Principal, scopesStr string) (string, error) {
+func (j *JWTService) GenerateToken(principal types.Principal) (string, error) {
 	now := time.Now()
 	claims := JWTClaims{
 		UserID:   principal.UserID,
 		TenantID: principal.TenantID,
 		Username: principal.Username,
 		Role:     principal.Role,
-		Scopes:   scopesStr,
+		Scopes:   principal.Scopes, // Use scopes array directly from principal
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,
 			Audience:  jwt.ClaimStrings{j.audience},
@@ -105,18 +105,11 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 
 // ClaimsToPrincipal converts JWT claims to a Principal
 func (j *JWTService) ClaimsToPrincipal(claims *JWTClaims) types.Principal {
-	// Convert scopes string to array
-	var scopes []string
-	if claims.Scopes != "" {
-		// Split by space (e.g., "read write" -> ["read", "write"])
-		scopes = []string{claims.Scopes} // For now, store as single string in array
-	}
-
 	return types.Principal{
 		UserID:   claims.UserID,
 		TenantID: claims.TenantID,
 		Username: claims.Username,
 		Role:     claims.Role,
-		Scopes:   scopes,
+		Scopes:   claims.Scopes, // Scopes are already []string
 	}
 }

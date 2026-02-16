@@ -176,22 +176,28 @@ func TestAuthService_Login_DefaultTenant(t *testing.T) {
 	}
 }
 
-func TestRoleToScopes(t *testing.T) {
+func TestRoleToScopesArray(t *testing.T) {
 	tests := []struct {
 		role     string
-		expected string
+		expected []string
 	}{
-		{"admin", "read write bootstrap audit"},
-		{"agent", "read write"},
-		{"developer", "read"},
-		{"unknown", ""},
+		{"admin", []string{"*"}},         // Python parity: ["*"] for admin
+		{"agent", []string{"cinema"}},    // Python parity: ["cinema"] for agent
+		{"developer", []string{"cinema"}}, // Python parity: ["cinema"] for developer
+		{"unknown", []string{}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.role, func(t *testing.T) {
-			scopes := roleToScopes(tt.role)
-			if scopes != tt.expected {
-				t.Errorf("Expected scopes '%s', got '%s'", tt.expected, scopes)
+			scopes := roleToScopesArray(tt.role)
+			if len(scopes) != len(tt.expected) {
+				t.Errorf("Expected %d scopes, got %d", len(tt.expected), len(scopes))
+				return
+			}
+			for i, scope := range tt.expected {
+				if scopes[i] != scope {
+					t.Errorf("Expected scopes[%d]='%s', got '%s'", i, scope, scopes[i])
+				}
 			}
 		})
 	}

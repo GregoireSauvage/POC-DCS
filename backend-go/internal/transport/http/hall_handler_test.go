@@ -53,7 +53,7 @@ func TestGetHalls_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
-	}, "")
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/halls", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -86,8 +86,8 @@ func TestGetHalls_AgentSeesINTERNAL(t *testing.T) {
 	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil)
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
-		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent",
-	}, "")
+		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/halls", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -169,8 +169,8 @@ func TestPostHalls_AgentAllowed(t *testing.T) {
 	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil)
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
-		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent",
-	}, "")
+		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},
+	})
 
 	payload := map[string]interface{}{
 		"name":            "Hall B",
@@ -197,7 +197,7 @@ func TestPostHalls_DeveloperForbidden(t *testing.T) {
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
-	}, "")
+	})
 
 	payload := map[string]interface{}{
 		"name":            "Hall C",

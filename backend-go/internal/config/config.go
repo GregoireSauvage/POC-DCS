@@ -75,7 +75,7 @@ func Load() *Config {
 		CacheTTLClassif: parseDurationSeconds(getenv("CACHE_TTL_CLASSIF_SEC", "300"), 300),
 		CacheTTLPDP:     parseDurationSeconds(getenv("CACHE_TTL_PDP_SEC", "60"), 60),
 		CacheTTLKMS:     parseDurationSeconds(getenv("CACHE_TTL_KMS_SEC", "10"), 10),
-		CacheTTLPepper:  parseDurationSeconds(getenv("CACHE_TTL_PEPPER_PATH", "300"), 300),
+		CacheTTLPepper:  parseDurationSeconds(getenv("CACHE_TTL_PEPPER_SEC", "300"), 300),
 		EnablePprof:     parseBool(getenv("ENABLE_PPROF", "false")),
 	}
 }
