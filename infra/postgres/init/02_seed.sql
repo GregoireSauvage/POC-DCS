@@ -1,16 +1,16 @@
 -- Tenant unique PoC
 -- On encode tenant_id directement dans les lignes (pas de table tenants pour garder simple)
 
--- Users (PoC) : password_hash = mot de passe en clair (à remplacer par bcrypt dans le backend si tu veux)
--- Identifiants :
+-- Users (PoC) : password_hash = bcrypt
+-- Identifiants (passwords en clair) :
 -- - dev / dev
 -- - agent / agent
 -- - admin / admin
 INSERT INTO users (tenant_id, username, role, password_hash)
 VALUES
-  ('t1', 'dev',   'developer', 'dev'),
-  ('t1', 'agent', 'agent',     'agent'),
-  ('t1', 'admin', 'admin',     'admin')
+  ('t1', 'dev',   'developer', '$2a$10$jceEtr.XLBzMomrUQzi/rOAa9ZA4yKk924IGPd3LjY7qSPzzaGJ4O'),
+  ('t1', 'agent', 'agent',     '$2a$10$Ui2tT/lQp6zt9QVmXslinO7KoLTLqFDgWvLS27xqZCVAl.VBbWCUy'),
+  ('t1', 'admin', 'admin',     '$2a$10$xPqTWNl/zQGqZz1X9/IphOPy/yf5hyBpU79SOe.y4KI9pekAz1Ovm')
 ON CONFLICT (tenant_id, username) DO NOTHING;
 
 -- Field classification
