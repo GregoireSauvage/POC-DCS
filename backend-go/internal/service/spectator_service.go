@@ -13,7 +13,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
-const pepperPath = "secret/dcs/pepper" // Python parity: config.VAULT_KV_PEPPER_PATH
+const defaultPepperPath = "secret/dcs" // Python parity: config.VAULT_KV_PEPPER_PATH
 
 // SpectatorService provides spectator business operations
 type SpectatorService struct {
@@ -36,7 +36,11 @@ func NewSpectatorService(
 	audit AuditWriter,
 	perf PerfWriter,
 	runtime RuntimeSettings,
+	pepperPath string,
 ) *SpectatorService {
+	if pepperPath == "" {
+		pepperPath = defaultPepperPath
+	}
 	return &SpectatorService{
 		repo:       repo,
 		hallRepo:   hallRepo,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository"
@@ -10,18 +11,23 @@ import (
 type perfService struct {
 	repo     repository.PerfLogRepository
 	enforcer PolicyEnforcer
+	source   string
 }
 
-func NewPerfService(repo repository.PerfLogRepository, enforcer PolicyEnforcer) PerfService {
+func NewPerfService(repo repository.PerfLogRepository, enforcer PolicyEnforcer, source string) PerfService {
 	return &perfService{
 		repo:     repo,
 		enforcer: enforcer,
+		source:   source,
 	}
 }
 
 func (s *perfService) Write(ctx context.Context, log *domain.PerfLog) error {
 	if s.repo == nil {
 		return repository.ErrInvalidInput
+	}
+	if log.Source == "" {
+		log.Source = normalizePerfSource(s.source)
 	}
 	return s.repo.Create(ctx, log)
 }
@@ -32,6 +38,7 @@ func (s *perfService) List(
 	reqCtx RequestContext,
 	limit int,
 	action *string,
+	source *string,
 ) ([]*domain.PerfLog, error) {
 	// DCS enforcement (required - no fallback)
 	// Perf endpoints expose sensitive performance data and MUST go through DCS PDP
@@ -53,7 +60,12 @@ func (s *perfService) List(
 	if limit <= 0 {
 		limit = 200
 	}
-	return s.repo.List(ctx, principal.TenantID, limit, action)
+	effectiveSource := source
+	if effectiveSource == nil || strings.TrimSpace(*effectiveSource) == "" {
+		src := normalizePerfSource(s.source)
+		effectiveSource = &src
+	}
+	return s.repo.List(ctx, principal.TenantID, limit, action, effectiveSource)
 }
 
 func (s *perfService) Summary(
@@ -63,6 +75,7 @@ func (s *perfService) Summary(
 	action *string,
 	cacheLevel *int,
 	allCacheLevels bool,
+	source *string,
 ) ([]*domain.PerfSummary, error) {
 	// DCS enforcement (required - no fallback)
 	// Perf endpoints expose sensitive performance data and MUST go through DCS PDP
@@ -81,5 +94,17 @@ func (s *perfService) Summary(
 	if s.repo == nil {
 		return nil, repository.ErrInvalidInput
 	}
-	return s.repo.Summary(ctx, principal.TenantID, action, cacheLevel, allCacheLevels)
+	effectiveSource := source
+	if effectiveSource == nil || strings.TrimSpace(*effectiveSource) == "" {
+		src := normalizePerfSource(s.source)
+		effectiveSource = &src
+	}
+	return s.repo.Summary(ctx, principal.TenantID, action, cacheLevel, allCacheLevels, effectiveSource)
+}
+
+func normalizePerfSource(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(value)
 }

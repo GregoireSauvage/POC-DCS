@@ -32,22 +32,25 @@ func (r *PerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) err
 
 	subjectUserID := nullableUUID(log.SubjectUserID)
 	subjectRole := nullableString(log.SubjectRole)
+	source := nullableString(log.Source)
 
 	query := `
-		INSERT INTO perf_logs (
-			ts, request_id,
-			tenant_id, subject_user_id, subject_role,
-			action, resource_type,
-			dcs_enabled, cache_level,
-			total_ms, pip_ms, pdp_ms, kms_ms, db_ms
-		) VALUES (
-			$1, $2,
-			$3, $4, $5,
-			$6, $7,
-			$8, $9,
-			$10, $11, $12, $13, $14
-		)
-	`
+			INSERT INTO perf_logs (
+				ts, request_id,
+				tenant_id, subject_user_id, subject_role,
+				source,
+				action, resource_type,
+				dcs_enabled, cache_level,
+				total_ms, pip_ms, pdp_ms, kms_ms, db_ms
+			) VALUES (
+				$1, $2,
+				$3, $4, $5,
+				$6,
+				$7, $8,
+				$9, $10,
+				$11, $12, $13, $14, $15
+			)
+		`
 
 	_, err := r.pool.Exec(ctx, query,
 		log.Timestamp,
@@ -55,6 +58,7 @@ func (r *PerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) err
 		log.TenantID,
 		subjectUserID,
 		subjectRole,
+		source,
 		log.Action,
 		log.ResourceType,
 		log.DCSEnabled,
@@ -77,6 +81,7 @@ func (r *PerfLogRepository) List(
 	tenantID string,
 	limit int,
 	action *string,
+	source *string,
 ) ([]*domain.PerfLog, error) {
 	if limit <= 0 {
 		limit = 200
@@ -86,6 +91,7 @@ func (r *PerfLogRepository) List(
 		SELECT
 			ts, request_id, tenant_id,
 			subject_user_id, subject_role,
+			COALESCE(source, 'unknown'),
 			action, resource_type,
 			dcs_enabled, cache_level,
 			COALESCE(total_ms, 0),
@@ -98,6 +104,10 @@ func (r *PerfLogRepository) List(
 	if action != nil {
 		query += " AND action = $" + strconv.Itoa(len(args)+1)
 		args = append(args, strings.TrimSpace(*action))
+	}
+	if source != nil {
+		query += " AND COALESCE(source, 'unknown') = $" + strconv.Itoa(len(args)+1)
+		args = append(args, strings.TrimSpace(*source))
 	}
 
 	query += " ORDER BY ts DESC LIMIT $" + strconv.Itoa(len(args)+1)
@@ -130,6 +140,7 @@ func (r *PerfLogRepository) Summary(
 	action *string,
 	cacheLevel *int,
 	allCacheLevels bool,
+	source *string,
 ) ([]*domain.PerfSummary, error) {
 	query := `
 		SELECT
@@ -146,6 +157,10 @@ func (r *PerfLogRepository) Summary(
 	if action != nil {
 		query += " AND action = $" + strconv.Itoa(len(args)+1)
 		args = append(args, strings.TrimSpace(*action))
+	}
+	if source != nil {
+		query += " AND COALESCE(source, 'unknown') = $" + strconv.Itoa(len(args)+1)
+		args = append(args, strings.TrimSpace(*source))
 	}
 
 	if !allCacheLevels && cacheLevel != nil {
@@ -186,6 +201,7 @@ func scanPerfLog(row pgx.Row) (*domain.PerfLog, error) {
 	var dbMS *float64
 	var subjectUserID pgtype.UUID
 	var subjectRole *string
+	var source string
 
 	err := row.Scan(
 		&log.Timestamp,
@@ -193,6 +209,7 @@ func scanPerfLog(row pgx.Row) (*domain.PerfLog, error) {
 		&log.TenantID,
 		&subjectUserID,
 		&subjectRole,
+		&source,
 		&log.Action,
 		&log.ResourceType,
 		&log.DCSEnabled,
@@ -216,6 +233,7 @@ func scanPerfLog(row pgx.Row) (*domain.PerfLog, error) {
 	if subjectRole != nil {
 		log.SubjectRole = *subjectRole
 	}
+	log.Source = source
 
 	log.PIPMS = pipMS
 	log.PDPMS = pdpMS

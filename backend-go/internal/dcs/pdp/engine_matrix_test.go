@@ -47,6 +47,8 @@ func TestAllowWithoutDCS_Matrix(t *testing.T) {
 		{"write allowed admin", "film.update_time", "admin", true},
 		{"audit denied agent", "audit.read", "agent", false},
 		{"audit allowed admin", "audit.read", "admin", true},
+		{"perf denied agent", "perf.read", "agent", false},
+		{"perf allowed admin", "perf.read", "admin", true},
 		{"unknown action", "x.y", "admin", false},
 	}
 

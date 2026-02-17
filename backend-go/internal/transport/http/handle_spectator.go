@@ -61,7 +61,12 @@ func (s *Server) handleSpectators(w nethttp.ResponseWriter, r *nethttp.Request) 
 		return
 	}
 	if err != nil {
-		s.logger.Error("spectator create error", "error", err.Error())
+		s.logger.Error(
+			"spectator create error",
+			"error", err.Error(),
+			"request_id", reqCtx.RequestID,
+			"tenant_id", principal.TenantID,
+		)
 		nethttp.Error(w, "internal error", nethttp.StatusInternalServerError)
 		return
 	}

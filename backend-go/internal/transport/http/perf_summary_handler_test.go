@@ -33,6 +33,26 @@ func TestPerfSummary_AdminRole_Returns200(t *testing.T) {
 	if len(out) != 1 || out[0].Action != "film.read" {
 		t.Fatalf("expected one summary row for film.read")
 	}
+	if perfSvc.lastSummarySource == nil || *perfSvc.lastSummarySource != server.cfg.PerfSource {
+		t.Fatalf("expected default source %q, got %v", server.cfg.PerfSource, perfSvc.lastSummarySource)
+	}
+}
+
+func TestPerfSummary_SourceQueryParam(t *testing.T) {
+	perfSvc := &mockPerfService{summaryRows: []*domain.PerfSummary{}}
+	server := newTestServerWithPerf(t, perfSvc)
+
+	req := httptest.NewRequest(http.MethodGet, "/perf/summary?source=go", nil)
+	req.Header.Set("Authorization", adminAuthHeader(t, server))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if perfSvc.lastSummarySource == nil || *perfSvc.lastSummarySource != "go" {
+		t.Fatalf("expected source go, got %v", perfSvc.lastSummarySource)
+	}
 }
 
 func TestPerfSummary_NonAdminRole_Returns403(t *testing.T) {

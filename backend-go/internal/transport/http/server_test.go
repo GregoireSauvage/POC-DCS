@@ -23,6 +23,7 @@ func testConfig() *config.Config {
 		DCSMode:         "on",
 		CacheLevel:      1,
 		CacheMaxEntries: 100,
+		PerfSource:      "go",
 		JWTSecret:       "test-secret",
 		JWTIssuer:       "test-issuer",
 		JWTAudience:     "test-audience",

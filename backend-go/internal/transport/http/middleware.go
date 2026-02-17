@@ -37,6 +37,13 @@ func (s *Server) jwtMiddleware(next nethttp.Handler) nethttp.Handler {
 		}
 
 		// Store claims in context
+		s.logger.Debug("jwt validated",
+			slog.String("user_id", claims.UserID),
+			slog.String("username", claims.Username),
+			slog.String("role", claims.Role),
+			slog.String("tenant_id", claims.TenantID),
+			slog.String("path", r.URL.Path),
+		)
 		ctx := context.WithValue(r.Context(), jwtClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -57,12 +64,20 @@ func (s *Server) adminMiddleware(next nethttp.Handler) nethttp.Handler {
 		if claims.Role != "admin" {
 			s.logger.Warn("non-admin user attempted to access admin endpoint",
 				slog.String("user_id", claims.UserID),
+				slog.String("username", claims.Username),
 				slog.String("role", claims.Role),
 				slog.String("path", r.URL.Path),
 			)
 			writeError(w, nethttp.StatusForbidden, "admin role required")
 			return
 		}
+
+		s.logger.Debug("admin access granted",
+			slog.String("user_id", claims.UserID),
+			slog.String("username", claims.Username),
+			slog.String("role", claims.Role),
+			slog.String("path", r.URL.Path),
+		)
 
 		next.ServeHTTP(w, r)
 	}))

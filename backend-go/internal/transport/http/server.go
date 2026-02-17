@@ -131,16 +131,23 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("audit logging disabled (no database)")
 	}
 
-	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService, nil, rt)
+	// Create perf service if DB available
+	var perfSvc service.PerfService
+	if db != nil {
+		perfRepo := postgres.NewPerfLogRepository(db)
+		perfSvc = service.NewPerfService(perfRepo, policyEnforcer, cfg.PerfSource)
+		logger.Info("performance logging enabled")
+	} else {
+		logger.Warn("performance logging disabled (no database)")
+	}
 
-	// Create hall repository (in-memory for now, PostgreSQL later)
+	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService, perfSvc, rt)
+
+	// Create hall repository (PostgreSQL if DB available, otherwise in-memory)
 	var hallRepo service.HallRepository
 	if db != nil {
-		logger.Info("using PostgreSQL hall repository (TODO)")
-		// hallRepo = postgres.NewHallRepository(db) // TODO: implement
-		hallRepo = memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		})
+		logger.Info("using PostgreSQL hall repository")
+		hallRepo = postgres.NewHallRepository(db)
 	} else {
 		logger.Warn("using in-memory hall repository (for development only)")
 		hallRepo = memory.NewHallRepository([]domain.Hall{
@@ -148,18 +155,26 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		})
 	}
 
-	hallService := service.NewHallService(hallRepo, policyEnforcer, auditService)
+	hallService := service.NewHallService(hallRepo, policyEnforcer, auditService, perfSvc, rt)
 
-	// Create spectator repository (in-memory for now)
-	spectatorRepo := memory.NewSpectatorRepository()
+	// Create spectator repository (PostgreSQL if DB available, otherwise in-memory)
+	var spectatorRepo service.SpectatorRepository
+	if db != nil {
+		logger.Info("using PostgreSQL spectator repository")
+		spectatorRepo = postgres.NewSpectatorRepository(db)
+	} else {
+		logger.Warn("using in-memory spectator repository (for development only)")
+		spectatorRepo = memory.NewSpectatorRepository()
+	}
 	spectatorService := service.NewSpectatorService(
 		spectatorRepo,
 		hallRepo,
 		kmsClient,
 		policyEnforcer,
 		auditService,
-		nil, // perf writer - will be set later
+		perfSvc,
 		rt,
+		cfg.VaultKVPepperPath,
 	)
 
 	// Create JWT service
@@ -173,16 +188,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Info("authentication service enabled")
 	} else {
 		logger.Warn("authentication service disabled (no database)")
-	}
-
-	// Create perf service if DB available
-	var perfSvc service.PerfService
-	if db != nil {
-		perfRepo := postgres.NewPerfLogRepository(db)
-		perfSvc = service.NewPerfService(perfRepo, policyEnforcer)
-		logger.Info("performance logging enabled")
-	} else {
-		logger.Warn("performance logging disabled (no database)")
 	}
 
 	mux := nethttp.NewServeMux()

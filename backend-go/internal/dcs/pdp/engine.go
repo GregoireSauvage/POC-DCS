@@ -172,7 +172,7 @@ func allowWithoutDCS(action, role string) bool {
 		return true
 	case "film.create", "hall.create", "spectator.create", "film.update_time":
 		return role == "agent" || role == "admin"
-	case "audit.read":
+	case "audit.read", "perf.read":
 		return role == "admin"
 	default:
 		return false

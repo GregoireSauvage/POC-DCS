@@ -270,6 +270,36 @@ func TestVaultTransitClient_GetPepperAndComputeLookup_WithCache(t *testing.T) {
 	}
 }
 
+func TestVaultTransitClient_GetPepper_WithSecretPrefix(t *testing.T) {
+	var pepperCalls int
+	server := newVaultTestServer(t, map[string]http.HandlerFunc{
+		"/v1/secret/data/dcs": func(w http.ResponseWriter, _ *http.Request) {
+			pepperCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"data": map[string]any{
+						"pepper": "pepper-secret",
+					},
+				},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newVaultClientForTest(t, server.URL, 1)
+
+	pepper, err := client.GetPepper(context.Background(), "secret/dcs")
+	if err != nil {
+		t.Fatalf("GetPepper failed: %v", err)
+	}
+	if string(pepper) != "pepper-secret" {
+		t.Fatalf("unexpected pepper value: %q", string(pepper))
+	}
+	if pepperCalls != 1 {
+		t.Fatalf("expected one pepper call, got %d", pepperCalls)
+	}
+}
+
 func TestVaultTransitClient_GetPepperErrors(t *testing.T) {
 	tests := []struct {
 		name    string

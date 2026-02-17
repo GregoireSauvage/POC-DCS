@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	vault "github.com/hashicorp/vault/api"
 
@@ -150,8 +151,18 @@ func (v *VaultTransitClient) GetPepper(ctx context.Context, path string) ([]byte
 	}
 
 	// Vault KV v2 path format: /v1/{mount}/data/{path}
-	// Assuming default mount "secret"
-	kvPath := fmt.Sprintf("secret/data/%s", path)
+	// Normalize paths like "secret/dcs" or "secret/data/dcs" to "secret/data/dcs"
+	clean := strings.Trim(path, "/")
+	switch {
+	case strings.HasPrefix(clean, "secret/data/"):
+		// already normalized
+	case strings.HasPrefix(clean, "secret/"):
+		clean = strings.TrimPrefix(clean, "secret/")
+		clean = fmt.Sprintf("secret/data/%s", clean)
+	default:
+		clean = fmt.Sprintf("secret/data/%s", clean)
+	}
+	kvPath := clean
 
 	secret, err := v.client.Logical().ReadWithContext(ctx, kvPath)
 	if err != nil {

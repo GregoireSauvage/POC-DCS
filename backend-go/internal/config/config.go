@@ -34,6 +34,9 @@ type Config struct {
 	DCSMode    string
 	CacheLevel int
 
+	// Perf
+	PerfSource string
+
 	// Cache
 	CacheMaxEntries int
 	CacheTTLClassif time.Duration
@@ -69,6 +72,9 @@ func Load() *Config {
 		// DCS
 		DCSMode:    getenv("DCS_MODE", "on"),
 		CacheLevel: parseInt(getenv("CACHE_LEVEL", "1"), 1),
+
+		// Perf
+		PerfSource: getenv("PERF_SOURCE", "go"),
 
 		// Cache
 		CacheMaxEntries: parseInt(getenv("CACHE_MAX_ENTRIES", "500"), 500),

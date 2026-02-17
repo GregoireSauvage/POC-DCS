@@ -2,6 +2,7 @@ package enforcer
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
@@ -82,6 +83,12 @@ func (e *DcsEnforcer) EvaluateAuditRead(
 	decision, _ := e.pdp.Evaluate(pi)
 	stop()
 
+	slog.Debug("perf.read decision",
+		slog.String("role", principal.Role),
+		slog.String("tenant_id", principal.TenantID),
+		slog.Bool("allow", decision.Allow),
+		slog.String("reason", decision.Reason),
+	)
 	return service.AuthorizationDecision{
 		Allow:  decision.Allow,
 		Reason: decision.Reason,

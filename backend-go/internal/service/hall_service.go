@@ -14,14 +14,18 @@ type hallService struct {
 	repo     HallRepository
 	enforcer PolicyEnforcer
 	audit    *AuditService
+	perf     PerfWriter
+	runtime  RuntimeSettings
 }
 
 // NewHallService creates a new hall service
-func NewHallService(repo HallRepository, enforcer PolicyEnforcer, audit *AuditService) HallService {
+func NewHallService(repo HallRepository, enforcer PolicyEnforcer, audit *AuditService, perf PerfWriter, runtime RuntimeSettings) HallService {
 	return &hallService{
 		repo:     repo,
 		enforcer: enforcer,
 		audit:    audit,
+		perf:     perf,
+		runtime:  runtime,
 	}
 }
 
@@ -67,6 +71,11 @@ func (s *hallService) List(
 		})
 	}
 
+	// 4. Write perf log (after successful list)
+	if s.perf != nil {
+		s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
+	}
+
 	return outputs, pctx, nil
 }
 
@@ -85,6 +94,9 @@ func (s *hallService) Create(
 		return HallOutput{}, pctx, fmt.Errorf("failed to evaluate hall create: %w", err)
 	}
 	if !decision.Allow {
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+		}
 		return HallOutput{}, pctx, ErrForbidden
 	}
 
@@ -117,11 +129,62 @@ func (s *hallService) Create(
 	}
 
 	// 4. Return response with read permissions applied
-	return HallOutput{
+	output := HallOutput{
 		ID:             hallID,
 		Name:           result.Name,
 		OwnerUserID:    result.OwnerUserID,
 		CurrentFilmID:  result.CurrentFilmID,
 		SpectatorCount: 0, // New hall has no spectators
-	}, pctx, nil
+	}
+
+	// 5. Write perf log (after successful create)
+	if s.perf != nil {
+		s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+	}
+
+	return output, pctx, nil
+}
+
+func (s *hallService) writePerfLog(
+	ctx context.Context,
+	pctx *perf.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	action string,
+	resourceType string,
+) {
+	if s.runtime == nil || s.perf == nil {
+		return
+	}
+	metrics := pctx.Metrics()
+
+	var pipMS, pdpMS, kmsMS, dbMS *float64
+	if v, ok := metrics["pip_ms"]; ok {
+		pipMS = &v
+	}
+	if v, ok := metrics["pdp_ms"]; ok {
+		pdpMS = &v
+	}
+	if v, ok := metrics["kms_ms"]; ok {
+		kmsMS = &v
+	}
+	if v, ok := metrics["db_ms"]; ok {
+		dbMS = &v
+	}
+
+	_ = s.perf.Write(ctx, &domain.PerfLog{
+		RequestID:     reqCtx.RequestID,
+		TenantID:      principal.TenantID,
+		SubjectUserID: principal.UserID,
+		SubjectRole:   principal.Role,
+		Action:        action,
+		ResourceType:  resourceType,
+		DCSEnabled:    s.runtime.DcsEnabled(),
+		CacheLevel:    s.runtime.CacheLevel(),
+		TotalMS:       pctx.TotalMS(),
+		PIPMS:         pipMS,
+		PDPMS:         pdpMS,
+		KMSMS:         kmsMS,
+		DBMS:          dbMS,
+	})
 }

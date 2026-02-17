@@ -19,6 +19,7 @@ class PerfLog(Base):
     tenant_id: Mapped[str] = mapped_column(String, nullable=False)
     subject_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     subject_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
 
     action: Mapped[str] = mapped_column(String, nullable=False)
     resource_type: Mapped[str] = mapped_column(String, nullable=False)

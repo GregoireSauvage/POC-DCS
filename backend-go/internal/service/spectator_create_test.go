@@ -140,7 +140,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{
 		TenantID: "t1",
@@ -223,7 +223,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{
 		TenantID: "t1",
@@ -279,7 +279,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{
 		TenantID: "t1",
@@ -328,7 +328,7 @@ func TestSpectatorService_Create_HallNotFound_ReturnsNotFound(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -369,7 +369,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -412,7 +412,7 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -455,7 +455,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -505,7 +505,7 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 		cacheLevel: 0,
 	}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime)
+	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
 
 	principal := Principal{
 		TenantID: "t1",

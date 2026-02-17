@@ -12,6 +12,8 @@ type PerfLog struct {
 	SubjectUserID string `json:"subject_user_id"`
 	SubjectRole   string `json:"subject_role"`
 
+	Source string `json:"source"`
+
 	Action       string `json:"action"`
 	ResourceType string `json:"resource_type"`
 

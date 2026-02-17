@@ -12,7 +12,7 @@ type PerfLogRepository interface {
 	Create(ctx context.Context, log *domain.PerfLog) error
 
 	// List returns perf logs for a tenant with optional action filter.
-	List(ctx context.Context, tenantID string, limit int, action *string) ([]*domain.PerfLog, error)
+	List(ctx context.Context, tenantID string, limit int, action *string, source *string) ([]*domain.PerfLog, error)
 
 	// Summary returns aggregated perf results for a tenant with filters.
 	Summary(
@@ -21,5 +21,6 @@ type PerfLogRepository interface {
 		action *string,
 		cacheLevel *int,
 		allCacheLevels bool,
+		source *string,
 	) ([]*domain.PerfSummary, error)
 }

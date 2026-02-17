@@ -18,6 +18,7 @@ type mockPerfLogRepository struct {
 	lastTenantID      string
 	lastLimit         int
 	lastAction        *string
+	lastSource        *string
 	summaryRows       []*domain.PerfSummary
 	summaryErr        error
 	summaryCalls      int
@@ -97,12 +98,14 @@ func (m *mockPerfLogRepository) List(
 	tenantID string,
 	limit int,
 	action *string,
+	source *string,
 ) ([]*domain.PerfLog, error) {
 	_ = ctx
 	m.listCalls++
 	m.lastTenantID = tenantID
 	m.lastLimit = limit
 	m.lastAction = action
+	m.lastSource = source
 	return m.listLogs, m.listErr
 }
 
@@ -112,6 +115,7 @@ func (m *mockPerfLogRepository) Summary(
 	action *string,
 	cacheLevel *int,
 	allCacheLevels bool,
+	source *string,
 ) ([]*domain.PerfSummary, error) {
 	_ = ctx
 	m.summaryCalls++
@@ -119,6 +123,7 @@ func (m *mockPerfLogRepository) Summary(
 	m.lastSummaryAction = action
 	m.lastCacheLevel = cacheLevel
 	m.lastAllCache = allCacheLevels
+	m.lastSource = source
 	return m.summaryRows, m.summaryErr
 }
 
@@ -131,12 +136,12 @@ func TestPerfService_List_Admin(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
 
-	logs, err := svc.List(context.Background(), principal, reqCtx, 50, &action)
+	logs, err := svc.List(context.Background(), principal, reqCtx, 50, &action, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -155,11 +160,14 @@ func TestPerfService_List_Admin(t *testing.T) {
 	if repo.lastAction == nil || *repo.lastAction != "film.read" {
 		t.Fatalf("expected action filter passed to repo")
 	}
+	if repo.lastSource == nil || *repo.lastSource != "go" {
+		t.Fatalf("expected default source filter passed to repo")
+	}
 }
 
 func TestPerfService_Write_CallsRepo(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	svc := NewPerfService(repo, nil)
+	svc := NewPerfService(repo, nil, "go")
 
 	log := &domain.PerfLog{
 		TenantID:  "t1",
@@ -177,11 +185,14 @@ func TestPerfService_Write_CallsRepo(t *testing.T) {
 	if repo.lastCreated != log {
 		t.Fatalf("expected log passed to repo")
 	}
+	if log.Source != "go" {
+		t.Fatalf("expected source to be defaulted, got %q", log.Source)
+	}
 }
 
 func TestPerfService_Write_RepoError(t *testing.T) {
 	repo := &mockPerfLogRepository{createErr: errors.New("db error")}
-	svc := NewPerfService(repo, nil)
+	svc := NewPerfService(repo, nil, "go")
 
 	err := svc.Write(context.Background(), &domain.PerfLog{TenantID: "t1"})
 	if err == nil {
@@ -195,12 +206,12 @@ func TestPerfService_List_NonAdmin(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "developer"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
@@ -215,12 +226,12 @@ func TestPerfService_List_RepoError(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if err == nil {
 		t.Fatal("expected repo error")
 	}
@@ -239,12 +250,12 @@ func TestPerfService_Summary_Admin(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	rows, err := svc.Summary(context.Background(), principal, reqCtx, &action, &cacheLevel, false)
+	rows, err := svc.Summary(context.Background(), principal, reqCtx, &action, &cacheLevel, false, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -274,12 +285,12 @@ func TestPerfService_Summary_NonAdmin(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "agent"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, false)
+	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, false, nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
@@ -294,12 +305,12 @@ func TestPerfService_Summary_RepoError(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, true)
+	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, true, nil)
 	if err == nil {
 		t.Fatal("expected repo error")
 	}
@@ -315,12 +326,12 @@ func TestPerfService_List_EnforcerAllows(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
 
-	logs, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	logs, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -342,12 +353,12 @@ func TestPerfService_List_EnforcerDenies(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
 	}
@@ -364,12 +375,12 @@ func TestPerfService_List_EnforcerError(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadError: errors.New("pdp unavailable"),
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if err == nil {
 		t.Fatal("expected error from enforcer")
 	}
@@ -385,12 +396,12 @@ func TestPerfService_List_EnforcerNil_AdminFallback(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	svc := NewPerfService(repo, nil) // nil enforcer
+	svc := NewPerfService(repo, nil, "go") // nil enforcer
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if !errors.Is(err, ErrDCSNotConfigured) {
 		t.Fatalf("expected ErrDCSNotConfigured, got %v", err)
 	}
@@ -401,12 +412,12 @@ func TestPerfService_List_EnforcerNil_AdminFallback(t *testing.T) {
 
 func TestPerfService_List_EnforcerNil_NonAdminFallback(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	svc := NewPerfService(repo, nil) // nil enforcer
+	svc := NewPerfService(repo, nil, "go") // nil enforcer
 
 	principal := Principal{TenantID: "t1", Role: "developer"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if !errors.Is(err, ErrDCSNotConfigured) {
 		t.Fatalf("expected ErrDCSNotConfigured, got %v", err)
 	}
@@ -422,12 +433,12 @@ func TestPerfService_List_EnforcerCalledBeforeRepo(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: false}, // Deny
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, _ = svc.List(context.Background(), principal, reqCtx, 50, nil)
+	_, _ = svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 
 	// Enforcer should be called first
 	if enforcer.evalPerfReadCalls != 1 {
@@ -447,12 +458,12 @@ func TestPerfService_Summary_EnforcerAllows(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	rows, err := svc.Summary(context.Background(), principal, reqCtx, &action, nil, false)
+	rows, err := svc.Summary(context.Background(), principal, reqCtx, &action, nil, false, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -474,12 +485,12 @@ func TestPerfService_Summary_EnforcerDenies(t *testing.T) {
 	enforcer := &mockPolicyEnforcer{
 		evalPerfReadDecision: AuthorizationDecision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer)
+	svc := NewPerfService(repo, enforcer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
-	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, false)
+	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, false, nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
 	}

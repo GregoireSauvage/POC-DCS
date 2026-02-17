@@ -16,6 +16,7 @@ type PerfService interface {
 		reqCtx RequestContext,
 		limit int,
 		action *string,
+		source *string,
 	) ([]*domain.PerfLog, error)
 
 	Summary(
@@ -25,5 +26,6 @@ type PerfService interface {
 		action *string,
 		cacheLevel *int,
 		allCacheLevels bool,
+		source *string,
 	) ([]*domain.PerfSummary, error)
 }

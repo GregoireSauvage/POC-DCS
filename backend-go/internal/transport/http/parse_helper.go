@@ -27,6 +27,14 @@ func parseActionParam(r *nethttp.Request) *string {
 	return &raw
 }
 
+func parseSourceParam(r *nethttp.Request) *string {
+	raw := strings.TrimSpace(r.URL.Query().Get("source"))
+	if raw == "" {
+		return nil
+	}
+	return &raw
+}
+
 func parseBoolParam(r *nethttp.Request, key string) (bool, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get(key))
 	if raw == "" {

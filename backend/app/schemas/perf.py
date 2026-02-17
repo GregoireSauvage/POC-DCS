@@ -10,6 +10,7 @@ class PerfOut(BaseModel):
     tenant_id: str
     subject_user_id: UUID | None
     subject_role: str | None
+    source: str | None
     action: str
     resource_type: str
     dcs_enabled: bool

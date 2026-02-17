@@ -21,6 +21,7 @@ type mockPerfService struct {
 	lastReqCtx    service.RequestContext
 	lastLimit     int
 	lastAction    *string
+	lastSource    *string
 
 	summaryRows        []*domain.PerfSummary
 	summaryErr         error
@@ -28,6 +29,7 @@ type mockPerfService struct {
 	lastSummaryAction  *string
 	lastCacheLevel     *int
 	lastAllCacheLevels bool
+	lastSummarySource  *string
 }
 
 func (m *mockPerfService) Write(ctx context.Context, log *domain.PerfLog) error {
@@ -42,12 +44,14 @@ func (m *mockPerfService) List(
 	reqCtx service.RequestContext,
 	limit int,
 	action *string,
+	source *string,
 ) ([]*domain.PerfLog, error) {
 	m.listCalls++
 	m.lastPrincipal = principal
 	m.lastReqCtx = reqCtx
 	m.lastLimit = limit
 	m.lastAction = action
+	m.lastSource = source
 	return m.listLogs, m.listErr
 }
 
@@ -58,6 +62,7 @@ func (m *mockPerfService) Summary(
 	action *string,
 	cacheLevel *int,
 	allCacheLevels bool,
+	source *string,
 ) ([]*domain.PerfSummary, error) {
 	m.summaryCalls++
 	m.lastPrincipal = principal
@@ -65,6 +70,7 @@ func (m *mockPerfService) Summary(
 	m.lastSummaryAction = action
 	m.lastCacheLevel = cacheLevel
 	m.lastAllCacheLevels = allCacheLevels
+	m.lastSummarySource = source
 	return m.summaryRows, m.summaryErr
 }
 
@@ -118,6 +124,26 @@ func TestPerf_AdminRole_Returns200(t *testing.T) {
 	}
 	if perfSvc.lastPrincipal.TenantID != "t1" {
 		t.Fatalf("expected tenant_id t1, got %q", perfSvc.lastPrincipal.TenantID)
+	}
+	if perfSvc.lastSource == nil || *perfSvc.lastSource != server.cfg.PerfSource {
+		t.Fatalf("expected default source %q, got %v", server.cfg.PerfSource, perfSvc.lastSource)
+	}
+}
+
+func TestPerf_SourceQueryParam(t *testing.T) {
+	perfSvc := &mockPerfService{listLogs: []*domain.PerfLog{}}
+	server := newTestServerWithPerf(t, perfSvc)
+
+	req := httptest.NewRequest(http.MethodGet, "/perf?source=python", nil)
+	req.Header.Set("Authorization", adminAuthHeader(t, server))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if perfSvc.lastSource == nil || *perfSvc.lastSource != "python" {
+		t.Fatalf("expected source python, got %v", perfSvc.lastSource)
 	}
 }
 

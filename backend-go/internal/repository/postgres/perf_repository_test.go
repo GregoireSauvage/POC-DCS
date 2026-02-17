@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgtype"
+	"github.com/jackc/pgx/v4"
 )
 
 type fakeRow struct {
@@ -124,6 +124,7 @@ func TestScanPerfLog_AllFields(t *testing.T) {
 			"t1",
 			subjectID,
 			"admin",
+			"go",
 			"film.read",
 			"film",
 			true,
@@ -168,6 +169,7 @@ func TestScanPerfLog_NullOptionalFields(t *testing.T) {
 			"t1",
 			subjectID,
 			"admin",
+			"go",
 			"film.update",
 			"film",
 			false,
