@@ -47,14 +47,13 @@ Moyenne du temps de traitement total d'une requete pour l'ecriture et la lecture
 DCS off : on skip completement le DCS et on envoie directement les données chiffrées au client. </br>
 ### **film.read :**
 
-
 |           	| **Backend Go** 	|                 	| **Backend Python** 	|                 	|
 |:---------:	|:--------------:	|:---------------:	|:------------------:	|:---------------:	|
 | **Cache** 	| **DCS on avg** 	| **DCS off avg** 	|   **DCS on avg**   	| **DCS off avg** 	|
-|     L0    	|     1.09 ms    	|     0.68 ms     	|       3.43 ms      	|     2.15 ms     	|
-|     L1    	|     1.08 ms    	|     0.67 ms     	|       3.20 ms      	|     2.13 ms     	|
-|     L2    	|     1.07 ms    	|     0.69 ms     	|       3.13 ms      	|     2.14 ms     	|
-|     L3    	|     0.69 ms    	|     0.69 ms     	|       2.18 ms      	|     2.17 ms     	|
+| L0        	| 1.10 ms        	| 0.63 ms         	| 3.48 ms            	| 2.15 ms         	|
+| L1        	| 1.05 ms        	| 0.63 ms         	| 3.20 ms            	| 2.17 ms         	|
+| L2        	| 1.04 ms        	| 0.64 ms         	| 3.21 ms            	| 2.17 ms         	|
+| L3        	| 0.65 ms        	| 0.64 ms         	| 2.19 ms            	| 2.20 ms         	|
 
 
 ### **film.update_time :**
@@ -62,10 +61,10 @@ DCS off : on skip completement le DCS et on envoie directement les données chif
 |           	| **Backend Go** 	|                 	| **Backend Python** 	|                 	|
 |:---------:	|:--------------:	|:---------------:	|:------------------:	|:---------------:	|
 | **Cache** 	| **DCS on avg** 	| **DCS off avg** 	|   **DCS on avg**   	| **DCS off avg** 	|
-| L0        	| 1.81 ms        	| 1.42 ms         	| 6.36 ms            	| 4.58 ms         	|
-| L1        	| 1.83 ms        	| 1.41 ms         	| 5.76 ms            	| 4.54 ms         	|
-| L2        	| 1.82 ms        	| 1.42 ms         	| 5.67 ms            	| 4.60 ms         	|
-| L3        	| 1.80 ms        	| 1.42 ms         	| 5.71 ms            	| 4.55 ms         	|
+| L0        	| 1.91 ms        	| 1.38 ms         	|       6.36 ms      	|     4.58 ms     	|
+| L1        	| 1.75 ms        	| 1.38 ms         	|       5.76 ms      	|     4.54 ms     	|
+| L2        	| 1.74 ms        	| 1.38 ms         	|       5.67 ms      	|     4.60 ms     	|
+| L3        	| 1.74 ms        	| 1.38 ms         	|       5.71 ms      	|     4.55 ms     	|
 
 ---
 
