@@ -29,6 +29,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 
 	server := &Server{
 		jwtService: jwtSvc,
+		logger:     testLogger(),
 	}
 
 	// Create a test handler that checks the extracted principal
@@ -75,6 +76,7 @@ func TestJWTMiddleware_MissingToken(t *testing.T) {
 
 	server := &Server{
 		jwtService: jwtSvc,
+		logger:     testLogger(),
 	}
 
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

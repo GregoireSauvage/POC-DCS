@@ -1,7 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
 import bcrypt
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.security.jwt import issue_token
