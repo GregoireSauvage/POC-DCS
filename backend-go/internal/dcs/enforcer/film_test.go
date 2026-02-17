@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
@@ -73,7 +74,7 @@ func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.Classification
 		DeviceTrust:    0.8,
 		ClientIPHeader: "x-real-ip",
 	})
-	engine := pdp.NewEngine(rt, cm)
+	engine := pdp.NewEngine(rt, cm, &dcsconfig.Defaults().PDP)
 	filmApplier := pep.NewFilmApplier(rt, crypto)
 	spectatorApplier := pep.NewSpectatorApplier(crypto)
 	return New(provider, engine, filmApplier, spectatorApplier, crypto, "secret/dcs")

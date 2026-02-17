@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
@@ -18,7 +19,7 @@ func newEngineForTest(mode string, cacheLevel int) *Engine {
 		KMSTTL:            time.Second,
 		PepperTTL:         time.Minute,
 	})
-	return NewEngine(rt, cm)
+	return NewEngine(rt, cm, &dcsconfig.Defaults().PDP)
 }
 
 func TestEngine_TenantMismatch(t *testing.T) {

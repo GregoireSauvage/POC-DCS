@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
@@ -15,12 +16,14 @@ import (
 type Engine struct {
 	runtime *runtime.Settings
 	cache   *cache.Manager
+	config  *dcsconfig.PDPConfig
 }
 
-func NewEngine(rt *runtime.Settings, cm *cache.Manager) *Engine {
+func NewEngine(rt *runtime.Settings, cm *cache.Manager, cfg *dcsconfig.PDPConfig) *Engine {
 	return &Engine{
 		runtime: rt,
 		cache:   cm,
+		config:  cfg,
 	}
 }
 
@@ -37,12 +40,12 @@ func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
 	var decision types.Decision
 	if !e.runtime.DcsEnabled() {
 		decision = types.Decision{
-			Allow:        allowWithoutDCS(input.Action, input.Principal.Role),
+			Allow:        e.allowWithoutDCS(input.Action, input.Principal.Role),
 			FieldActions: map[string]types.FieldAction{},
 			Reason:       "dcs_off",
 		}
 	} else {
-		decision = decide(input)
+		decision = e.decide(input)
 	}
 
 	// Compute decision hash for audit correlation
@@ -89,94 +92,129 @@ func DecisionHash(decision types.Decision) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func decide(input types.PolicyInput) types.Decision {
+func (e *Engine) decide(input types.PolicyInput) types.Decision {
 	if input.Principal.TenantID != input.Resource.TenantID {
 		return types.Decision{Allow: false, FieldActions: map[string]types.FieldAction{}, Reason: "tenant_mismatch"}
 	}
 
+	// Determine if action is allowed based on config action lists
 	allow := false
 	reason := "default_deny"
-	switch input.Action {
-	case "film.read", "hall.read", "spectator.read":
+
+	if contains(e.config.ReadActions, input.Action) {
 		allow = true
 		reason = "read_allowed"
-	case "film.create", "hall.create", "spectator.create", "film.update_time", "search.spectator":
+	} else if contains(e.config.WriteActions, input.Action) {
 		allow = input.Principal.Role == "agent" || input.Principal.Role == "admin"
 		if allow {
 			reason = "write_allowed"
 		} else {
 			reason = "write_forbidden"
 		}
-	case "audit.read", "perf.read":
+	} else if contains(e.config.BootstrapActions, input.Action) {
+		allow = true
+		reason = "bootstrap_allowed"
+	} else if contains(e.config.AuditActions, input.Action) {
 		allow = input.Principal.Role == "admin"
 		if allow {
 			reason = "audit_allowed"
 		} else {
 			reason = "audit_admin_only"
 		}
-	default:
+	} else {
 		return types.Decision{Allow: false, FieldActions: map[string]types.FieldAction{}, Reason: "unknown_action"}
 	}
+
 	if !allow {
 		return types.Decision{Allow: false, FieldActions: map[string]types.FieldAction{}, Reason: reason}
 	}
 
+	// Build field actions using config-driven matrix
 	fieldActions := map[string]types.FieldAction{}
 	for field, meta := range input.Resource.Fields {
-		fieldActions[field] = actionForClassification(input.Principal.Role, meta.Classification)
+		// Apply default classification if missing
+		classification := meta.Classification
+		if classification == "" {
+			classification = e.config.DefaultClassification
+		}
+		fieldActions[field] = e.actionForClassification(input.Principal.Role, classification)
 	}
 
+	// Apply spectator agent hardening from config
 	if input.Resource.Type == "spectator" && input.Principal.Role == "agent" {
-		for _, fn := range []string{"name", "external_id"} {
+		for _, fn := range e.config.SpectatorAgentHardeningFields {
 			if _, ok := fieldActions[fn]; ok {
 				fieldActions[fn] = types.FieldActionMaskAfterDecrypt
 			}
 		}
 	}
+
 	return types.Decision{Allow: true, FieldActions: fieldActions, Reason: reason}
 }
 
-func actionForClassification(role string, cls types.Classification) types.FieldAction {
-	switch strings.ToLower(role) {
-	case "admin":
-		switch cls {
-		case types.ClassificationSensitive, types.ClassificationPII:
-			return types.FieldActionDecrypt
-		default:
-			return types.FieldActionAllow
-		}
-	case "agent":
-		switch cls {
-		case types.ClassificationPII:
-			return types.FieldActionMaskAfterDecrypt
-		case types.ClassificationSensitive:
-			return types.FieldActionDecrypt
-		default:
-			return types.FieldActionAllow
-		}
-	case "developer":
-		switch cls {
-		case types.ClassificationPublic:
-			return types.FieldActionAllow
-		default:
-			return types.FieldActionMaskAfterDecrypt
-		}
+func (e *Engine) actionForClassification(role string, cls types.Classification) types.FieldAction {
+	// Lookup in config matrix: role -> classification -> action string
+	roleMatrix, ok := e.config.RoleClassificationActions[strings.ToLower(role)]
+	if !ok {
+		return types.FieldActionDeny
+	}
+
+	actionStr, ok := roleMatrix[string(cls)]
+	if !ok {
+		return types.FieldActionDeny
+	}
+
+	// Convert action string to FieldAction type
+	return parseFieldAction(actionStr)
+}
+
+func parseFieldAction(s string) types.FieldAction {
+	switch s {
+	case "allow":
+		return types.FieldActionAllow
+	case "decrypt":
+		return types.FieldActionDecrypt
+	case "mask_after_decrypt":
+		return types.FieldActionMaskAfterDecrypt
+	case "deny":
+		return types.FieldActionDeny
 	default:
 		return types.FieldActionDeny
 	}
 }
 
-func allowWithoutDCS(action, role string) bool {
-	switch action {
-	case "film.read", "hall.read", "spectator.read", "search.spectator":
+func (e *Engine) allowWithoutDCS(action, role string) bool {
+	// Read actions: always allowed
+	if contains(e.config.ReadActions, action) {
 		return true
-	case "film.create", "hall.create", "spectator.create", "film.update_time":
-		return role == "agent" || role == "admin"
-	case "audit.read", "perf.read":
-		return role == "admin"
-	default:
-		return false
 	}
+
+	// Write actions: agent/admin only
+	if contains(e.config.WriteActions, action) {
+		return role == "agent" || role == "admin"
+	}
+
+	// Bootstrap actions: always allowed
+	if contains(e.config.BootstrapActions, action) {
+		return true
+	}
+
+	// Audit actions: admin only
+	if contains(e.config.AuditActions, action) {
+		return role == "admin"
+	}
+
+	return false
+}
+
+// contains checks if a string slice contains a specific value
+func contains(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func decisionCacheKey(dcsEnabled bool, input types.PolicyInput) string {

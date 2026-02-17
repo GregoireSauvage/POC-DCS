@@ -5,9 +5,15 @@ import (
 	"time"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
+
+// testPDPConfig returns a default PDPConfig for tests
+func testPDPConfig() *dcsconfig.PDPConfig {
+	return &dcsconfig.Defaults().PDP
+}
 
 func TestEngine_DcsOn_FieldActions(t *testing.T) {
 	rt := runtime.New("on", 2)
@@ -18,7 +24,7 @@ func TestEngine_DcsOn_FieldActions(t *testing.T) {
 		KMSTTL:            time.Second,
 		PepperTTL:         time.Minute,
 	})
-	engine := NewEngine(rt, cm)
+	engine := NewEngine(rt, cm, testPDPConfig())
 
 	input := types.PolicyInput{
 		Principal: types.Principal{TenantID: "t1", UserID: "u1", Username: "admin", Role: "admin"},
@@ -52,7 +58,7 @@ func TestEngine_CacheAtLevel2(t *testing.T) {
 		KMSTTL:            time.Second,
 		PepperTTL:         time.Minute,
 	})
-	engine := NewEngine(rt, cm)
+	engine := NewEngine(rt, cm, testPDPConfig())
 
 	input := types.PolicyInput{
 		Principal: types.Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"},
@@ -87,7 +93,7 @@ func TestEngine_DcsOff(t *testing.T) {
 		KMSTTL:            time.Second,
 		PepperTTL:         time.Minute,
 	})
-	engine := NewEngine(rt, cm)
+	engine := NewEngine(rt, cm, testPDPConfig())
 
 	input := types.PolicyInput{
 		Principal: types.Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"},

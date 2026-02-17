@@ -2,11 +2,29 @@ package pdp
 
 import (
 	"testing"
+	"time"
 
+	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
+func testEngine() *Engine {
+	rt := runtime.New("on", 0)
+	cm := cache.NewManager(rt, cache.Options{
+		MaxEntries:        100,
+		ClassificationTTL: time.Minute,
+		PDPTTL:            time.Minute,
+		KMSTTL:            time.Second,
+		PepperTTL:         time.Minute,
+	})
+	return NewEngine(rt, cm, &dcsconfig.Defaults().PDP)
+}
+
 func TestActionForClassification_Matrix(t *testing.T) {
+	engine := testEngine()
+
 	tests := []struct {
 		name string
 		role string
@@ -14,19 +32,23 @@ func TestActionForClassification_Matrix(t *testing.T) {
 		want types.FieldAction
 	}{
 		{"admin public", "admin", types.ClassificationPublic, types.FieldActionAllow},
+		{"admin internal", "admin", types.ClassificationInternal, types.FieldActionAllow},
 		{"admin sensitive", "admin", types.ClassificationSensitive, types.FieldActionDecrypt},
 		{"admin pii", "admin", types.ClassificationPII, types.FieldActionDecrypt},
 		{"agent public", "agent", types.ClassificationPublic, types.FieldActionAllow},
+		{"agent internal", "agent", types.ClassificationInternal, types.FieldActionAllow},
 		{"agent sensitive", "agent", types.ClassificationSensitive, types.FieldActionDecrypt},
 		{"agent pii", "agent", types.ClassificationPII, types.FieldActionMaskAfterDecrypt},
 		{"developer public", "developer", types.ClassificationPublic, types.FieldActionAllow},
 		{"developer internal", "developer", types.ClassificationInternal, types.FieldActionMaskAfterDecrypt},
+		{"developer sensitive", "developer", types.ClassificationSensitive, types.FieldActionMaskAfterDecrypt},
+		{"developer pii", "developer", types.ClassificationPII, types.FieldActionMaskAfterDecrypt},
 		{"unknown role", "visitor", types.ClassificationPublic, types.FieldActionDeny},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := actionForClassification(tc.role, tc.cls)
+			got := engine.actionForClassification(tc.role, tc.cls)
 			if got != tc.want {
 				t.Fatalf("actionForClassification(%q, %q)=%q, want %q", tc.role, tc.cls, got, tc.want)
 			}
@@ -35,6 +57,8 @@ func TestActionForClassification_Matrix(t *testing.T) {
 }
 
 func TestAllowWithoutDCS_Matrix(t *testing.T) {
+	engine := testEngine()
+
 	tests := []struct {
 		name   string
 		action string
@@ -54,7 +78,7 @@ func TestAllowWithoutDCS_Matrix(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := allowWithoutDCS(tc.action, tc.role); got != tc.want {
+			if got := engine.allowWithoutDCS(tc.action, tc.role); got != tc.want {
 				t.Fatalf("allowWithoutDCS(%q,%q)=%v, want %v", tc.action, tc.role, got, tc.want)
 			}
 		})
@@ -62,7 +86,9 @@ func TestAllowWithoutDCS_Matrix(t *testing.T) {
 }
 
 func TestDecide_AuditAndUnknownRoleFieldActions(t *testing.T) {
-	auditDenied := decide(types.PolicyInput{
+	engine := testEngine()
+
+	auditDenied := engine.decide(types.PolicyInput{
 		Principal: types.Principal{TenantID: "t1", Role: "agent"},
 		Action:    "audit.read",
 		Resource:  types.Resource{TenantID: "t1"},
@@ -74,7 +100,7 @@ func TestDecide_AuditAndUnknownRoleFieldActions(t *testing.T) {
 		t.Fatalf("unexpected reason: %q", auditDenied.Reason)
 	}
 
-	readUnknown := decide(types.PolicyInput{
+	readUnknown := engine.decide(types.PolicyInput{
 		Principal: types.Principal{TenantID: "t1", Role: "visitor"},
 		Action:    "film.read",
 		Resource: types.Resource{

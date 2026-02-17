@@ -7,10 +7,10 @@
   },
   "pdp": {
     "default_classification": "INTERNAL",
-    "read_actions": ["film.read", "hall.read", "spectator.read", "search.spectator"],
-    "write_actions": ["film.create", "hall.create", "spectator.create", "film.update_time"],
+    "read_actions": ["film.read", "hall.read", "spectator.read"],
+    "write_actions": ["film.create", "hall.create", "spectator.create", "film.update_time", "search.spectator"],
     "bootstrap_actions": ["bootstrap"],
-    "audit_actions": ["audit.read"],
+    "audit_actions": ["audit.read", "perf.read"],
     "role_classification_actions": {
       "admin": {
         "PUBLIC": "allow",

@@ -10,6 +10,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
@@ -41,6 +42,22 @@ type Server struct {
 }
 
 func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
+	// Load DCS config (PIP + PDP rules)
+	var dcsCfg *dcsconfig.DCSConfig
+	if cfg.DCSConfigPath != "" {
+		loaded, err := dcsconfig.Load(cfg.DCSConfigPath)
+		if err != nil {
+			logger.Warn("Failed to load DCS config, using defaults", "path", cfg.DCSConfigPath, "error", err)
+			dcsCfg = dcsconfig.Defaults()
+		} else {
+			dcsCfg = loaded
+			logger.Info("Loaded DCS config from file", "path", cfg.DCSConfigPath)
+		}
+	} else {
+		logger.Warn("DCS_CONFIG_PATH not set, using hardcoded defaults")
+		dcsCfg = dcsconfig.Defaults()
+	}
+
 	rt := runtime.New(cfg.DCSMode, cfg.CacheLevel)
 	cm := cache.NewManager(rt, cache.Options{
 		MaxEntries:        cfg.CacheMaxEntries,
@@ -88,7 +105,8 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		})
 	}
 
-	provider := pip.NewProvider(rt, cm, &pip.StaticClassificationStore{
+	// Classification store: use DB if available, fallback to static
+	staticStore := &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]types.Classification{
 			"film": {
 				"title":        types.ClassificationPublic,
@@ -105,14 +123,28 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 				"external_id": types.ClassificationPII,
 			},
 		},
-	}, pip.Config{
+	}
+
+	var classificationStore pip.ClassificationStore
+	if db != nil {
+		// Use DB-backed store with fallback to static
+		classificationRepo := postgres.NewClassificationRepository(db)
+		classificationStore = pip.NewDBClassificationStore(classificationRepo, staticStore)
+		logger.Info("Using DB-backed classification store with static fallback")
+	} else {
+		// Use static store only
+		classificationStore = staticStore
+		logger.Warn("Using static classification store (no database)")
+	}
+
+	provider := pip.NewProvider(rt, cm, classificationStore, pip.Config{
 		Env:            cfg.Env,
-		Channel:        "web",
-		Purpose:        "cinema_ops",
-		DeviceTrust:    0.8,
-		ClientIPHeader: "x-real-ip",
+		Channel:        dcsCfg.PIP.Channel,
+		Purpose:        dcsCfg.PIP.Purpose,
+		DeviceTrust:    dcsCfg.PIP.DeviceTrust,
+		ClientIPHeader: dcsCfg.PIP.ClientIPHeader,
 	})
-	engine := pdp.NewEngine(rt, cm)
+	engine := pdp.NewEngine(rt, cm, &dcsCfg.PDP)
 	filmApplier := pep.NewFilmApplier(rt, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
 	policyEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
