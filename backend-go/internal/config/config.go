@@ -15,9 +15,29 @@ type Config struct {
 	GRPCAddr string
 	LogLevel slog.Level
 
+	// Database
+	DatabaseURL string
+
+	// Vault
+	VaultAddr          string
+	VaultToken         string
+	VaultTransitKey    string
+	VaultKVPepperPath  string
+
+	// JWT
+	JWTSecret   string
+	JWTIssuer   string
+	JWTAudience string
+	JWTTTLMin   int
+
+	// DCS
 	DCSMode    string
 	CacheLevel int
 
+	// Perf
+	PerfSource string
+
+	// Cache
 	CacheMaxEntries int
 	CacheTTLClassif time.Duration
 	CacheTTLPDP     time.Duration
@@ -34,9 +54,29 @@ func Load() *Config {
 		GRPCAddr: getenv("GRPC_ADDR", ":50051"),
 		LogLevel: parseLogLevel(getenv("LOG_LEVEL", "INFO")),
 
+		// Database
+		DatabaseURL: getenv("DATABASE_URL", ""),
+
+		// Vault
+		VaultAddr:         getenv("VAULT_ADDR", "http://localhost:8200"),
+		VaultToken:        getenv("VAULT_TOKEN", ""),
+		VaultTransitKey:   getenv("VAULT_TRANSIT_KEY", "cinema-dcs"),
+		VaultKVPepperPath: getenv("VAULT_KV_PEPPER_PATH", "secret/dcs"),
+
+		// JWT
+		JWTSecret:   getenv("JWT_SECRET", "dev-secret-change-me"),
+		JWTIssuer:   getenv("JWT_ISSUER", "cinema-dcs-poc"),
+		JWTAudience: getenv("JWT_AUDIENCE", "cinema-ui"),
+		JWTTTLMin:   parseInt(getenv("JWT_TTL_MINUTES", "240"), 240),
+
+		// DCS
 		DCSMode:    getenv("DCS_MODE", "on"),
 		CacheLevel: parseInt(getenv("CACHE_LEVEL", "1"), 1),
 
+		// Perf
+		PerfSource: getenv("PERF_SOURCE", "go"),
+
+		// Cache
 		CacheMaxEntries: parseInt(getenv("CACHE_MAX_ENTRIES", "500"), 500),
 		CacheTTLClassif: parseDurationSeconds(getenv("CACHE_TTL_CLASSIF_SEC", "300"), 300),
 		CacheTTLPDP:     parseDurationSeconds(getenv("CACHE_TTL_PDP_SEC", "60"), 60),

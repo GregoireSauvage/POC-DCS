@@ -1,0 +1,114 @@
+package service
+
+import "context"
+
+type Principal struct {
+	TenantID string
+	UserID   string
+	Username string
+	Role     string
+	Scopes   []string
+}
+
+type RequestContext struct {
+	RequestID   string
+	ClientIP    string
+	Channel     string
+	Purpose     string
+	DeviceTrust float64
+	Env         string
+}
+
+type FilmReadInput struct {
+	FilmID        string
+	Title         string
+	TimeElapsedCT string
+}
+
+type FilmCreateInput struct {
+	Title       string
+	TimeElapsed int
+}
+
+type FilmReadResult struct {
+	TimeElapsed     interface{}
+	FieldsDecrypted []string // Fields that were decrypted for audit logging
+	FieldsMasked    []string // Fields that were masked for audit logging
+	FieldsDenied    []string // Fields that were denied for audit logging
+}
+
+type AuthorizationDecision struct {
+	Allow        bool
+	Reason       string
+	DecisionHash string // Hash of PDP decision for audit correlation
+}
+
+type PolicyEnforcer interface {
+	EvaluateAuditRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EvaluatePerfRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EvaluateFilmCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EvaluateFilmUpdateTime(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		filmID string,
+	) (AuthorizationDecision, error)
+	EnforceFilmRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		film FilmReadInput,
+	) (FilmReadResult, error)
+
+	// Hall policies
+	EvaluateHallCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EvaluateHallRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		hallID string,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EnforceHallRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		hall HallReadInput,
+	) (HallReadResult, error)
+
+	// Spectator policies
+	EvaluateSpectatorCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		ownerUserID string,
+	) (AuthorizationDecision, error)
+	EvaluateSpectatorSearch(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+	) (AuthorizationDecision, error)
+	EnforceSpectatorRead(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		spectator SpectatorReadInput,
+	) (SpectatorReadResult, error)
+}

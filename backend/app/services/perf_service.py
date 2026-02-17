@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.runtime_settings import get_cache_level
 from app.db.models.perf_log import PerfLog
 from app.observability.perf import PerfContext
@@ -27,6 +28,7 @@ def write_perf(
         tenant_id=tenant_id,
         subject_user_id=subject_user_id,
         subject_role=subject_role,
+        source=settings.PERF_SOURCE,
         action=action,
         resource_type=resource_type,
         dcs_enabled=dcs_enabled,

@@ -35,6 +35,7 @@ export type PerfOut = {
   tenant_id: string;
   subject_user_id: string | null;
   subject_role: string | null;
+  source?: string | null;
   action: string;
   resource_type: string;
   dcs_enabled: boolean;

@@ -25,7 +25,7 @@ func NewEngine(rt *runtime.Settings, cm *cache.Manager) *Engine {
 }
 
 func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
-	cacheable := e.cache.LevelEnabled(2) && (input.Action == "film.read" || input.Action == "film.update_time")
+	cacheable := e.cache.LevelEnabled(2) && (input.Action == "film.read" || input.Action == "film.update_time" || input.Action == "film.create")
 	cacheKey := ""
 	if cacheable {
 		cacheKey = decisionCacheKey(e.runtime.DcsEnabled(), input)
@@ -45,14 +45,46 @@ func (e *Engine) Evaluate(input types.PolicyInput) (types.Decision, bool) {
 		decision = decide(input)
 	}
 
+	// Compute decision hash for audit correlation
+	decision.Hash = DecisionHash(decision)
+
 	if cacheable {
 		e.cache.PDP.Set(cacheKey, decision, 0)
 	}
 	return decision, false
 }
 
+// DecisionHash computes a deterministic SHA256 hash of a decision.
+// Field actions are sorted by key to ensure the same decision always produces the same hash,
+// matching Python's json.dumps(sort_keys=True) behavior.
+//
+// NOTE: Uses compact JSON format (no spaces) for better performance.
+// This differs from Python's default json.dumps() which adds spaces after : and ,
+// If strict parity with existing Python audit logs is required, use MarshalIndent with custom separator.
 func DecisionHash(decision types.Decision) string {
-	raw, _ := json.Marshal(decision)
+	// Sort field_actions keys to ensure deterministic output
+	fieldKeys := make([]string, 0, len(decision.FieldActions))
+	for k := range decision.FieldActions {
+		fieldKeys = append(fieldKeys, k)
+	}
+	sort.Strings(fieldKeys)
+
+	// Build sorted map to guarantee consistent JSON marshaling
+	sortedActions := make(map[string]types.FieldAction, len(decision.FieldActions))
+	for _, k := range fieldKeys {
+		sortedActions[k] = decision.FieldActions[k]
+	}
+
+	// Create payload matching Python's structure
+	payload := map[string]interface{}{
+		"allow":         decision.Allow,
+		"field_actions": sortedActions,
+		"reason":        decision.Reason,
+	}
+
+	// Use compact JSON format (matches Go's default json.Marshal)
+	// This is more efficient than Python's default which adds spaces
+	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -65,17 +97,17 @@ func decide(input types.PolicyInput) types.Decision {
 	allow := false
 	reason := "default_deny"
 	switch input.Action {
-	case "film.read", "hall.read", "spectator.read", "search.spectator":
+	case "film.read", "hall.read", "spectator.read":
 		allow = true
 		reason = "read_allowed"
-	case "film.create", "hall.create", "spectator.create", "film.update_time":
+	case "film.create", "hall.create", "spectator.create", "film.update_time", "search.spectator":
 		allow = input.Principal.Role == "agent" || input.Principal.Role == "admin"
 		if allow {
 			reason = "write_allowed"
 		} else {
 			reason = "write_forbidden"
 		}
-	case "audit.read":
+	case "audit.read", "perf.read":
 		allow = input.Principal.Role == "admin"
 		if allow {
 			reason = "audit_allowed"
@@ -140,7 +172,7 @@ func allowWithoutDCS(action, role string) bool {
 		return true
 	case "film.create", "hall.create", "spectator.create", "film.update_time":
 		return role == "agent" || role == "admin"
-	case "audit.read":
+	case "audit.read", "perf.read":
 		return role == "admin"
 	default:
 		return false

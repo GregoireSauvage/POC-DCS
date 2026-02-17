@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     CACHE_TTL_PEPPER_SEC: int = 300
     CACHE_MAX_ENTRIES: int = 500
 
+    PERF_SOURCE: str = "python"
+
     DCS_CONFIG_PATH: str = ""
 
     DATABASE_URL: str = "sqlite+pysqlite:///:memory:"

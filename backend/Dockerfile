@@ -9,6 +9,8 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev   # (puis repasse en --frozen quand ton lock est OK)
 
 COPY app ./app
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 
 FROM python:3.12-slim AS runtime
 WORKDIR /app

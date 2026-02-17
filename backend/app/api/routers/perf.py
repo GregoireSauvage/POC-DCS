@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.runtime_settings import get_cache_level
 from app.core.security.auth import Principal, require_role
 from app.db.models.perf_log import PerfLog
@@ -19,10 +20,15 @@ def list_perf(
     _: Annotated[Principal, Depends(require_role("admin"))],
     limit: int = Query(200, ge=1, le=1000),
     action: str | None = Query(None),
+    source: str | None = Query(None),
 ):
+    if source is None:
+        source = settings.PERF_SOURCE
     q = db.query(PerfLog).order_by(PerfLog.ts.desc())
     if action:
         q = q.filter(PerfLog.action == action)
+    if source:
+        q = q.filter(PerfLog.source == source)
     rows = q.limit(limit).all()
     return [
         {
@@ -31,6 +37,7 @@ def list_perf(
             "tenant_id": r.tenant_id,
             "subject_user_id": r.subject_user_id,
             "subject_role": r.subject_role,
+            "source": r.source,
             "action": r.action,
             "resource_type": r.resource_type,
             "dcs_enabled": r.dcs_enabled,
@@ -52,9 +59,12 @@ def perf_summary(
     action: str | None = Query(None),
     cache_level: int | None = Query(None, ge=0),
     all_cache_levels: bool = Query(False),
+    source: str | None = Query(None),
 ):
     if not all_cache_levels and cache_level is None:
         cache_level = get_cache_level()
+    if source is None:
+        source = settings.PERF_SOURCE
     q = (
         db.query(
             PerfLog.action,
@@ -68,6 +78,8 @@ def perf_summary(
     )
     if action:
         q = q.filter(PerfLog.action == action)
+    if source:
+        q = q.filter(PerfLog.source == source)
     if cache_level is not None and not all_cache_levels:
         q = q.filter(PerfLog.cache_level == cache_level)
     rows = q.all()

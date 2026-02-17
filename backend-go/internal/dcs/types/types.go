@@ -60,4 +60,5 @@ type Decision struct {
 	Allow        bool
 	FieldActions map[string]FieldAction
 	Reason       string
+	Hash         string // Deterministic hash of PDP decision for audit correlation
 }

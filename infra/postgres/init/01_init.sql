@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS perf_logs (
   tenant_id        TEXT NOT NULL,
   subject_user_id  UUID,
   subject_role     TEXT,
+  source           TEXT DEFAULT 'unknown',
 
   action           TEXT NOT NULL,
   resource_type    TEXT NOT NULL,

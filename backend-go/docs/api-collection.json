@@ -1,0 +1,63 @@
+{
+  "info": {
+    "name": "Cinema DCS API",
+    "description": "API collection for Cinema DCS PoC",
+    "version": "0.1.0"
+  },
+  "baseUrl": "http://localhost:8080",
+  "auth": {
+    "type": "bearer",
+    "description": "JWT token from /api/auth/login"
+  },
+  "endpoints": [
+    {
+      "name": "Login",
+      "method": "POST",
+      "path": "/auth/login",
+      "body": {
+        "username": "admin",
+        "password": "password"
+      },
+      "description": "Authenticate and receive JWT token"
+    },
+    {
+      "name": "List Films",
+      "method": "GET",
+      "path": "/films",
+      "auth": true,
+      "description": "Get all films with DCS applied"
+    },
+    {
+      "name": "Update Film Time",
+      "method": "PATCH",
+      "path": "/films/{film_id}/time?time_elapsed=120",
+      "auth": true,
+      "description": "Update film time_elapsed (admin/agent only)"
+    },
+    {
+      "name": "Admin Settings (Get)",
+      "method": "GET",
+      "path": "/admin/settings",
+      "auth": true,
+      "description": "Get DCS runtime settings (admin only)"
+    },
+    {
+      "name": "Admin Settings (Patch)",
+      "method": "PATCH",
+      "path": "/admin/settings",
+      "auth": true,
+      "body": {
+        "dcs_mode": "off",
+        "cache_level": 2
+      },
+      "description": "Update DCS runtime settings (admin only)"
+    },
+    {
+      "name": "Get Audit Logs",
+      "method": "GET",
+      "path": "/audit?limit=200",
+      "auth": true,
+      "description": "Get audit logs (admin only)"
+    }
+  ]
+}

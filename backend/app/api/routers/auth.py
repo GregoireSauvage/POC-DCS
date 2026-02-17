@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+import bcrypt
 from sqlalchemy.orm import Session
 
 from app.core.security.jwt import issue_token
@@ -19,7 +20,16 @@ def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]):
         .filter(User.username == payload.username, User.tenant_id == "t1")
         .one_or_none()
     )
-    if user is None or user.password_hash != payload.password:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        valid = bcrypt.checkpw(
+            payload.password.encode("utf-8"),
+            user.password_hash.encode("utf-8"),
+        )
+    except ValueError:
+        valid = False
+    if not valid:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     scopes = ["*"] if user.role == "admin" else ["cinema"]

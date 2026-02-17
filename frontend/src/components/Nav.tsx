@@ -1,10 +1,18 @@
+import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
+import { getApiBase, setApiBase } from "../api/client";
 import { useAuth } from "../state/auth";
 import { Button, Pill } from "./ui";
+
+const BACKEND_OPTIONS = [
+  { value: "/api", label: "Python (/api)" },
+  { value: "/api-go", label: "Go (/api-go)" },
+];
 
 export default function Nav() {
   const auth = useAuth();
   const nav = useNavigate();
+  const [apiBase, setApiBaseState] = useState(() => getApiBase());
 
   return (
     <header className="topbar">
@@ -23,6 +31,23 @@ export default function Nav() {
         </div>
 
         <div className="spacer" />
+
+        <div className="backend-switch">
+          <span className="muted">Backend</span>
+          <select
+            aria-label="Backend"
+            value={apiBase}
+            onChange={(e) => {
+              const next = setApiBase(e.target.value);
+              setApiBaseState(next);
+              window.location.reload();
+            }}
+          >
+            {BACKEND_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
 
         {auth.token ? (
           <>
