@@ -414,6 +414,28 @@ func (f *fakeHallEnforcer) EnforceSpectatorRead(_ context.Context, _ Principal, 
 	return SpectatorReadResult{}, errors.New("not implemented")
 }
 
+// Crypto delegation stubs
+func (f *fakeHallEnforcer) Encrypt(_ context.Context, plaintext string) (string, error) {
+	return "encrypted-" + plaintext, nil
+}
+
+func (f *fakeHallEnforcer) Decrypt(_ context.Context, ciphertext string) (string, error) {
+	return "decrypted", nil
+}
+
+func (f *fakeHallEnforcer) GetPepper(_ context.Context, path string) ([]byte, error) {
+	return []byte("test-pepper"), nil
+}
+
+// Enforce create stubs
+func (f *fakeHallEnforcer) EnforceFilmCreate(_ context.Context, _ Principal, _ RequestContext, _ FilmCreatePlain) (FilmCreateEncrypted, error) {
+	return FilmCreateEncrypted{}, errors.New("not implemented")
+}
+
+func (f *fakeHallEnforcer) EnforceSpectatorCreate(_ context.Context, _ Principal, _ RequestContext, _ SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
+	return SpectatorCreateEncrypted{}, errors.New("not implemented")
+}
+
 // Helper
 func stringPtr(s string) *string {
 	return &s

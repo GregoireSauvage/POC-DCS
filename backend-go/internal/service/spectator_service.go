@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/google/uuid"
 
@@ -17,39 +17,30 @@ const defaultPepperPath = "secret/dcs" // Python parity: config.VAULT_KV_PEPPER_
 
 // SpectatorService provides spectator business operations
 type SpectatorService struct {
-	repo       SpectatorRepository
-	hallRepo   HallRepository
-	kms        KMS
-	enforcer   PolicyEnforcer
-	audit      AuditWriter
-	perf       PerfWriter
-	runtime    RuntimeSettings
-	pepperPath string
+	repo     SpectatorRepository
+	hallRepo HallRepository
+	enforcer PolicyEnforcer
+	audit    AuditWriter
+	perf     PerfWriter
+	runtime  RuntimeSettings
 }
 
 // NewSpectatorService creates a new spectator service
 func NewSpectatorService(
 	repo SpectatorRepository,
 	hallRepo HallRepository,
-	kms KMS,
 	enforcer PolicyEnforcer,
 	audit AuditWriter,
 	perf PerfWriter,
 	runtime RuntimeSettings,
-	pepperPath string,
 ) *SpectatorService {
-	if pepperPath == "" {
-		pepperPath = defaultPepperPath
-	}
 	return &SpectatorService{
-		repo:       repo,
-		hallRepo:   hallRepo,
-		kms:        kms,
-		enforcer:   enforcer,
-		audit:      audit,
-		perf:       perf,
-		runtime:    runtime,
-		pepperPath: pepperPath,
+		repo:     repo,
+		hallRepo: hallRepo,
+		enforcer: enforcer,
+		audit:    audit,
+		perf:     perf,
+		runtime:  runtime,
 	}
 }
 
@@ -71,58 +62,46 @@ func (s *SpectatorService) Create(
 		return SpectatorOutput{}, pctx, ErrNotFound
 	}
 
-	// 2. Evaluate spectator.create policy
-	decision, err := s.enforcer.EvaluateSpectatorCreate(ctx, principal, reqCtx, hall.OwnerUserID)
+	// 2. Authorize and encrypt (enforcer handles both PDP + PEP)
+	encrypted, err := s.enforcer.EnforceSpectatorCreate(ctx, principal, reqCtx, SpectatorCreatePlain{
+		HallID:     input.HallID,
+		Name:       input.Name,
+		Age:        input.Age,
+		ExternalID: input.ExternalID,
+	})
 	if err != nil {
-		return SpectatorOutput{}, pctx, err
-	}
-	if !decision.Allow {
-		// Audit + perf logging on deny (Python parity)
-		if s.audit != nil {
-			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny",
-				decision.DecisionHash, nil, nil, nil, nil)
-		}
+		// Enforcer returns ErrForbidden if denied
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
 		}
-		return SpectatorOutput{}, pctx, ErrForbidden
+		// Audit log for deny (Python parity)
+		if errors.Is(err, ErrForbidden) && s.audit != nil {
+			// Extract decision hash and details from ForbiddenError if available
+			var forbiddenErr *ForbiddenError
+			decisionHash := ""
+			details := map[string]interface{}(nil)
+			if errors.As(err, &forbiddenErr) {
+				decisionHash = forbiddenErr.DecisionHash
+				details = forbiddenErr.Details
+			}
+			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", decisionHash, details, nil, nil, nil)
+		}
+		return SpectatorOutput{}, pctx, err
 	}
 
-	// 3. Encrypt PII fields
-	nameCT, err := s.kms.Encrypt(ctx, input.Name)
-	if err != nil {
-		return SpectatorOutput{}, pctx, fmt.Errorf("encrypt name: %w", err)
-	}
-	ageCT, err := s.kms.Encrypt(ctx, strconv.Itoa(input.Age))
-	if err != nil {
-		return SpectatorOutput{}, pctx, fmt.Errorf("encrypt age: %w", err)
-	}
-	externalIDCT, err := s.kms.Encrypt(ctx, input.ExternalID)
-	if err != nil {
-		return SpectatorOutput{}, pctx, fmt.Errorf("encrypt external_id: %w", err)
-	}
-
-	// 4. Compute HMAC lookup for searchable encryption
-	pepper, err := s.kms.GetPepper(ctx, s.pepperPath)
-	if err != nil {
-		return SpectatorOutput{}, pctx, fmt.Errorf("get pepper: %w", err)
-	}
-	normalized := kms.NormalizeExternalID(input.ExternalID)
-	lookup := kms.ComputeHMACLookup(pepper, normalized)
-
-	// 5. Create spectator entity
+	// 3. Create spectator entity with encrypted data
 	spectatorID := uuid.New().String()
 	spectator := &domain.Spectator{
 		TenantID:         principal.TenantID,
 		ID:               spectatorID,
-		HallID:           input.HallID,
-		NameCT:           nameCT,
-		AgeCT:            ageCT,
-		ExternalIDCT:     externalIDCT,
-		ExternalIDLookup: lookup,
+		HallID:           encrypted.HallID,
+		NameCT:           encrypted.NameCT,
+		AgeCT:            encrypted.AgeCT,
+		ExternalIDCT:     encrypted.ExternalIDCT,
+		ExternalIDLookup: encrypted.ExternalIDLookup,
 	}
 
-	// 6. Insert into DB
+	// 4. Insert into DB
 	if err := s.repo.Create(ctx, spectator); err != nil {
 		return SpectatorOutput{}, pctx, err
 	}
@@ -150,7 +129,7 @@ func (s *SpectatorService) Create(
 	if s.audit != nil {
 		details := map[string]interface{}{"hall_id": input.HallID}
 		s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
-			spectator.ID, "allow", decision.DecisionHash, details,
+			spectator.ID, "allow", "", details,
 			result.FieldsDecrypted, result.FieldsMasked, result.FieldsDenied)
 	}
 	if s.perf != nil {
@@ -184,7 +163,7 @@ func (s *SpectatorService) Search(
 		// Audit + perf logging on deny
 		if s.audit != nil {
 			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
-				decision.DecisionHash, nil, nil, nil, nil)
+				"", nil, nil, nil, nil)
 		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
@@ -193,7 +172,7 @@ func (s *SpectatorService) Search(
 	}
 
 	// 2. Compute HMAC lookup
-	pepper, err := s.kms.GetPepper(ctx, s.pepperPath)
+	pepper, err := s.enforcer.GetPepper(ctx, defaultPepperPath)
 	if err != nil {
 		return nil, pctx, fmt.Errorf("get pepper: %w", err)
 	}
@@ -239,7 +218,7 @@ func (s *SpectatorService) Search(
 	if s.audit != nil {
 		details := map[string]interface{}{"matches": len(out)}
 		s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
-			decision.DecisionHash, details, nil, nil, nil)
+			"", details, nil, nil, nil)
 	}
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")

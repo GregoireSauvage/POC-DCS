@@ -86,6 +86,28 @@ func (m *mockPolicyEnforcer) EnforceSpectatorRead(ctx context.Context, principal
 	return SpectatorReadResult{}, errors.New("not implemented")
 }
 
+// Crypto delegation stubs
+func (m *mockPolicyEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
+	return "encrypted-" + plaintext, nil
+}
+
+func (m *mockPolicyEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
+	return "decrypted", nil
+}
+
+func (m *mockPolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
+	return []byte("test-pepper"), nil
+}
+
+// Enforce create stubs
+func (m *mockPolicyEnforcer) EnforceFilmCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {
+	return FilmCreateEncrypted{}, errors.New("not implemented")
+}
+
+func (m *mockPolicyEnforcer) EnforceSpectatorCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
+	return SpectatorCreateEncrypted{}, errors.New("not implemented")
+}
+
 func (m *mockPerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) error {
 	_ = ctx
 	m.createCalls++

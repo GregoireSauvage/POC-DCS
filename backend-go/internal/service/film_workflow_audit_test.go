@@ -36,13 +36,12 @@ func TestFilmService_List_WritesAudit_AdminDecrypts(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: "encrypted-120"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -115,13 +114,12 @@ func TestFilmService_List_WritesAudit_DeveloperMasks(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Inception", TimeElapsedCT: "encrypted-148"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -169,13 +167,12 @@ func TestFilmService_List_WritesAudit_EmptyResult(t *testing.T) {
 	repo := &fakeFilmRepo{
 		films: []FilmRecord{}, // No films for this tenant
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-empty"}
@@ -225,13 +222,12 @@ func TestFilmService_List_WritesAudit_MultipleFilms(t *testing.T) {
 			{TenantID: "t1", ID: "film-3", Title: "Film 3", TimeElapsedCT: "encrypted-90"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-multi"}
@@ -276,13 +272,12 @@ func TestFilmService_List_NoAudit_ServiceNil(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "encrypted-100"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := (*mockAuditService)(nil) // NIL audit service
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-noaudit"}
@@ -304,7 +299,6 @@ func TestFilmService_List_AuditError_DoesNotFail(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "encrypted-100"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := defaultPolicyEnforcer()
 	auditSvc := &mockAuditService{
 		writeError: errors.New("audit DB unavailable"), // Simulate audit write failure
@@ -312,7 +306,7 @@ func TestFilmService_List_AuditError_DoesNotFail(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-error"}
@@ -343,9 +337,7 @@ func TestFilmService_UpdateTime_WritesAudit_Allow(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "old-encrypted"},
 		},
 	}
-	kms := &fakeKMS{
-		encryptValue: "new-encrypted-150",
-	}
+
 	enforcer := &fakePolicyEnforcer{
 		evaluateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, Reason: "admin allowed"}, nil
@@ -356,7 +348,7 @@ func TestFilmService_UpdateTime_WritesAudit_Allow(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -415,7 +407,6 @@ func TestFilmService_UpdateTime_WritesAudit_Deny(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "encrypted"},
 		},
 	}
-	kms := &fakeKMS{}
 	enforcer := &fakePolicyEnforcer{
 		evaluateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: false, Reason: "developer not allowed"}, nil
@@ -425,7 +416,7 @@ func TestFilmService_UpdateTime_WritesAudit_Deny(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -470,7 +461,6 @@ func TestFilmService_UpdateTime_NoAudit_ServiceNil(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "encrypted"},
 		},
 	}
-	kms := &fakeKMS{encryptValue: "new-encrypted"}
 	enforcer := &fakePolicyEnforcer{
 		evaluateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true}, nil
@@ -481,7 +471,7 @@ func TestFilmService_UpdateTime_NoAudit_ServiceNil(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-noaudit"}
@@ -503,7 +493,6 @@ func TestFilmService_UpdateTime_AuditError_DoesNotFail(t *testing.T) {
 			{TenantID: "t1", ID: "film-1", Title: "Film", TimeElapsedCT: "encrypted"},
 		},
 	}
-	kms := &fakeKMS{encryptValue: "new-encrypted"}
 	enforcer := &fakePolicyEnforcer{
 		evaluateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true}, nil
@@ -516,7 +505,7 @@ func TestFilmService_UpdateTime_AuditError_DoesNotFail(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewFilmService(repo, enforcer, kms, auditSvc, perfWriter, runtime)
+	svc := NewFilmService(repo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-error"}
@@ -534,10 +523,6 @@ func TestFilmService_UpdateTime_AuditError_DoesNotFail(t *testing.T) {
 
 	t.Log("UpdateTime succeeded despite audit write error (graceful degradation)")
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 // defaultFilmReadFunc is a simple read function for tests that don't need complex enforcement
 func defaultFilmReadFunc(_ context.Context, principal Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {

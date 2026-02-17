@@ -20,7 +20,8 @@
       "Bash(docker-compose:*)",
       "Bash(go get:*)",
       "Bash(go test:*)",
-      "Bash(go tool cover:*)"
+      "Bash(go tool cover:*)",
+      "Bash(go clean:*)"
     ]
   }
 }

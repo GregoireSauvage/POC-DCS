@@ -2,9 +2,13 @@ package enforcer
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
+	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -134,4 +138,83 @@ func (e *DcsEnforcer) EnforceSpectatorRead(
 	}
 
 	return result, nil
+}
+
+// EnforceSpectatorCreate authorizes, encrypts PII fields AND computes HMAC lookup
+// Combines PDP (authorization) + PEP (encryption + HMAC) in a single operation
+// Returns encrypted data ready for database persistence with searchable encryption
+func (e *DcsEnforcer) EnforceSpectatorCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	input service.SpectatorCreatePlain,
+) (service.SpectatorCreateEncrypted, error) {
+
+	// Phase 1: PIP - Build policy input
+	pipInput := pip.Input{
+		Principal:    toDCSPrincipal(principal),
+		Action:       "spectator.create",
+		ResourceType: "spectator",
+		ResourceID:   "",
+		Request:      toDCSRequestContext(reqCtx),
+		CryptoMeta: map[string]map[string]string{
+			"name":        {"ciphertext_field": "name_ct"},
+			"age":         {"ciphertext_field": "age_ct"},
+			"external_id": {"ciphertext_field": "external_id_ct"},
+		},
+	}
+
+	policyInput, err := e.pip.Build(ctx, pipInput)
+	if err != nil {
+		return service.SpectatorCreateEncrypted{}, fmt.Errorf("pip build failed: %w", err)
+	}
+
+	// Phase 2: PDP - Evaluate authorization
+	stop := perf.Span(ctx, "pdp_ms")
+	decision, _ := e.pdp.Evaluate(policyInput)
+	stop()
+
+	if !decision.Allow {
+		return service.SpectatorCreateEncrypted{}, service.ErrForbidden
+	}
+
+	// Phase 3: PEP - Encrypt all PII fields
+	stop = perf.Span(ctx, "kms_ms")
+
+	nameCT, err := e.kms.Encrypt(ctx, input.Name)
+	if err != nil {
+		stop()
+		return service.SpectatorCreateEncrypted{}, fmt.Errorf("encrypt name: %w", err)
+	}
+
+	ageCT, err := e.kms.Encrypt(ctx, strconv.Itoa(input.Age))
+	if err != nil {
+		stop()
+		return service.SpectatorCreateEncrypted{}, fmt.Errorf("encrypt age: %w", err)
+	}
+
+	externalIDCT, err := e.kms.Encrypt(ctx, input.ExternalID)
+	if err != nil {
+		stop()
+		return service.SpectatorCreateEncrypted{}, fmt.Errorf("encrypt external_id: %w", err)
+	}
+
+	stop()
+
+	// Phase 4: PEP - Compute HMAC lookup for searchable encryption
+	pepper, err := e.kms.GetPepper(ctx, e.pepperPath)
+	if err != nil {
+		return service.SpectatorCreateEncrypted{}, fmt.Errorf("get pepper: %w", err)
+	}
+
+	normalized := kms.NormalizeExternalID(input.ExternalID)
+	lookup := kms.ComputeHMACLookup(pepper, normalized)
+
+	return service.SpectatorCreateEncrypted{
+		HallID:           input.HallID,
+		NameCT:           nameCT,
+		AgeCT:            ageCT,
+		ExternalIDCT:     externalIDCT,
+		ExternalIDLookup: lookup,
+	}, nil
 }

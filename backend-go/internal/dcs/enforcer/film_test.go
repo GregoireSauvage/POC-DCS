@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
+	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
@@ -31,19 +32,33 @@ func (f *fixedClassificationStore) GetByResourceType(_ context.Context, _ string
 	return out, nil
 }
 
-type fakeDecryptor struct {
+type fakeCryptoService struct {
 	value string
 	err   error
 }
 
-func (f *fakeDecryptor) Decrypt(_ context.Context, _ string) (string, error) {
+func (f *fakeCryptoService) Encrypt(_ context.Context, plaintext string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return "vault:v1:encrypted-" + plaintext, nil
+}
+
+func (f *fakeCryptoService) Decrypt(_ context.Context, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	return f.value, nil
 }
 
-func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.ClassificationStore, decryptor pep.Decryptor) *DcsEnforcer {
+func (f *fakeCryptoService) GetPepper(_ context.Context, _ string) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []byte("test-pepper"), nil
+}
+
+func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.ClassificationStore, crypto CryptoService) *DcsEnforcer {
 	rt := runtime.New(mode, cacheLevel)
 	cm := cache.NewManager(rt, cache.Options{
 		MaxEntries:        100,
@@ -59,10 +74,10 @@ func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.Classification
 		DeviceTrust:    0.8,
 		ClientIPHeader: "x-real-ip",
 	})
-	engine := pdp.NewEngine(rt, cm)
-	filmApplier := pep.NewFilmApplier(rt, decryptor)
-	spectatorApplier := pep.NewSpectatorApplier(decryptor)
-	return New(provider, engine, filmApplier, spectatorApplier, decryptor)
+	engine := pdp.NewEngine(rt, cm, &dcsconfig.Defaults().PDP)
+	filmApplier := pep.NewFilmApplier(rt, crypto)
+	spectatorApplier := pep.NewSpectatorApplier(crypto)
+	return New(provider, engine, filmApplier, spectatorApplier, crypto, "secret/dcs")
 }
 
 func defaultFilmStore() pip.ClassificationStore {
@@ -95,7 +110,7 @@ func defaultReqCtx() service.RequestContext {
 }
 
 func TestDcsEnforcer_EvaluateFilmUpdateTime_AdminAllowed(t *testing.T) {
-	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeDecryptor{value: "120"})
+	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "120"})
 
 	decision, err := e.EvaluateFilmUpdateTime(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), "f1")
 	if err != nil {
@@ -110,7 +125,7 @@ func TestDcsEnforcer_EvaluateFilmUpdateTime_AdminAllowed(t *testing.T) {
 }
 
 func TestDcsEnforcer_EvaluateFilmUpdateTime_DeveloperForbidden(t *testing.T) {
-	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeDecryptor{value: "120"})
+	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "120"})
 
 	decision, err := e.EvaluateFilmUpdateTime(context.Background(), defaultPrincipal("developer"), defaultReqCtx(), "f1")
 	if err != nil {
@@ -125,7 +140,7 @@ func TestDcsEnforcer_EvaluateFilmUpdateTime_DeveloperForbidden(t *testing.T) {
 }
 
 func TestDcsEnforcer_EnforceFilmRead_DeveloperMasked(t *testing.T) {
-	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeDecryptor{value: "120"})
+	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "120"})
 
 	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("developer"), defaultReqCtx(), service.FilmReadInput{
 		FilmID:        "f1",
@@ -141,7 +156,7 @@ func TestDcsEnforcer_EnforceFilmRead_DeveloperMasked(t *testing.T) {
 }
 
 func TestDcsEnforcer_EnforceFilmRead_AdminDecrypt(t *testing.T) {
-	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeDecryptor{value: "240"})
+	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "240"})
 
 	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), service.FilmReadInput{
 		FilmID:        "f1",
@@ -158,7 +173,7 @@ func TestDcsEnforcer_EnforceFilmRead_AdminDecrypt(t *testing.T) {
 
 func TestDcsEnforcer_EnforceFilmRead_PIPError(t *testing.T) {
 	storeErr := errors.New("classification store down")
-	e := newDcsEnforcerForTest("on", 2, &fixedClassificationStore{err: storeErr}, &fakeDecryptor{value: "240"})
+	e := newDcsEnforcerForTest("on", 2, &fixedClassificationStore{err: storeErr}, &fakeCryptoService{value: "240"})
 
 	_, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), service.FilmReadInput{
 		FilmID:        "f1",
@@ -171,7 +186,7 @@ func TestDcsEnforcer_EnforceFilmRead_PIPError(t *testing.T) {
 }
 
 func TestDcsEnforcer_EvaluateFilmUpdateTime_DCSOff(t *testing.T) {
-	e := newDcsEnforcerForTest("off", 0, defaultFilmStore(), &fakeDecryptor{value: "120"})
+	e := newDcsEnforcerForTest("off", 0, defaultFilmStore(), &fakeCryptoService{value: "120"})
 
 	decision, err := e.EvaluateFilmUpdateTime(context.Background(), defaultPrincipal("developer"), defaultReqCtx(), "f1")
 	if err != nil {

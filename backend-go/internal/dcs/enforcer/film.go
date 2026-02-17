@@ -2,7 +2,9 @@ package enforcer
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
@@ -12,22 +14,47 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
+// CryptoService provides encryption, decryption and pepper management
+// Used by DCS enforcer for PEP (Policy Enforcement Point) operations
+type CryptoService interface {
+	Encrypt(ctx context.Context, plaintext string) (string, error)
+	Decrypt(ctx context.Context, ciphertext string) (string, error)
+	GetPepper(ctx context.Context, path string) ([]byte, error)
+}
+
 type DcsEnforcer struct {
 	pip              *pip.Provider
 	pdp              *pdp.Engine
 	filmApplier      *pep.FilmApplier
 	spectatorApplier *pep.SpectatorApplier
-	kms              pep.Decryptor // For creating appliers on-the-fly
+	kms              CryptoService // Full crypto service (encrypt + decrypt + pepper)
+	pepperPath       string        // Vault KV path for HMAC pepper
 }
 
-func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.FilmApplier, spectatorApplier *pep.SpectatorApplier, kms pep.Decryptor) *DcsEnforcer {
+func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.FilmApplier, spectatorApplier *pep.SpectatorApplier, kms CryptoService, pepperPath string) *DcsEnforcer {
 	return &DcsEnforcer{
 		pip:              pipProvider,
 		pdp:              pdpEngine,
 		filmApplier:      filmApplier,
 		spectatorApplier: spectatorApplier,
 		kms:              kms,
+		pepperPath:       pepperPath,
 	}
+}
+
+// Encrypt delegates to the underlying KMS for direct encryption needs
+func (e *DcsEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
+	return e.kms.Encrypt(ctx, plaintext)
+}
+
+// Decrypt delegates to the underlying KMS for direct decryption needs
+func (e *DcsEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
+	return e.kms.Decrypt(ctx, ciphertext)
+}
+
+// GetPepper delegates to the underlying KMS for pepper retrieval
+func (e *DcsEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
+	return e.kms.GetPepper(ctx, path)
 }
 
 func (e *DcsEnforcer) EvaluateFilmCreate(
@@ -143,6 +170,50 @@ func (e *DcsEnforcer) EnforceFilmRead(
 		FieldsDecrypted: result.Decrypted,
 		FieldsMasked:    result.Masked,
 		FieldsDenied:    result.Denied,
+	}, nil
+}
+
+// EnforceFilmCreate authorizes AND encrypts sensitive fields for film creation
+// Combines PDP (authorization) + PEP (encryption) in a single operation
+// Returns encrypted data ready for database persistence
+func (e *DcsEnforcer) EnforceFilmCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	input service.FilmCreatePlain,
+) (service.FilmCreateEncrypted, error) {
+
+	// Phase 1: PIP - Build policy input
+	pi, err := e.pip.Build(ctx, pip.Input{
+		Principal:    toDCSPrincipal(principal),
+		Action:       "film.create",
+		ResourceType: "film",
+		Request:      toDCSRequestContext(reqCtx),
+	})
+	if err != nil {
+		return service.FilmCreateEncrypted{}, fmt.Errorf("pip build failed: %w", err)
+	}
+
+	// Phase 2: PDP - Evaluate authorization
+	stop := perf.Span(ctx, "pdp_ms")
+	decision, _ := e.pdp.Evaluate(pi)
+	stop()
+
+	if !decision.Allow {
+		return service.FilmCreateEncrypted{}, service.ErrForbidden
+	}
+
+	// Phase 3: PEP - Encrypt sensitive fields
+	stop = perf.Span(ctx, "kms_ms")
+	timeElapsedCT, err := e.kms.Encrypt(ctx, strconv.Itoa(input.TimeElapsed))
+	stop()
+	if err != nil {
+		return service.FilmCreateEncrypted{}, fmt.Errorf("encrypt time_elapsed: %w", err)
+	}
+
+	return service.FilmCreateEncrypted{
+		Title:         input.Title,
+		TimeElapsedCT: timeElapsedCT,
 	}, nil
 }
 

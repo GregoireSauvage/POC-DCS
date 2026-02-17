@@ -32,3 +32,10 @@ type Spectator struct {
 	Labels           []string
 	CreatedAt        time.Time
 }
+
+// FieldClassification represents a field-level classification rule from the database
+type FieldClassification struct {
+	ResourceType   string // "film", "hall", "spectator"
+	FieldName      string // "title", "name", "age", etc.
+	Classification string // "PUBLIC", "INTERNAL", "SENSITIVE", "PII"
+}

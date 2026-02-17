@@ -30,6 +30,20 @@ type FilmCreateInput struct {
 	TimeElapsed int
 }
 
+// FilmCreatePlain represents plaintext film data before encryption
+// Used as input to DCS enforcer for authorization + encryption
+type FilmCreatePlain struct {
+	Title       string
+	TimeElapsed int
+}
+
+// FilmCreateEncrypted represents film data after encryption by DCS enforcer
+// Ready for database persistence
+type FilmCreateEncrypted struct {
+	Title         string // Public field (not encrypted)
+	TimeElapsedCT string // Encrypted ciphertext from KMS
+}
+
 type FilmReadResult struct {
 	TimeElapsed     interface{}
 	FieldsDecrypted []string // Fields that were decrypted for audit logging
@@ -44,6 +58,11 @@ type AuthorizationDecision struct {
 }
 
 type PolicyEnforcer interface {
+	// Generic crypto operations (delegated to KMS)
+	Encrypt(ctx context.Context, plaintext string) (string, error)
+	Decrypt(ctx context.Context, ciphertext string) (string, error)
+	GetPepper(ctx context.Context, path string) ([]byte, error)
+
 	EvaluateAuditRead(
 		ctx context.Context,
 		principal Principal,
@@ -71,6 +90,16 @@ type PolicyEnforcer interface {
 		reqCtx RequestContext,
 		film FilmReadInput,
 	) (FilmReadResult, error)
+
+	// EnforceFilmCreate authorizes AND encrypts sensitive fields for film creation
+	// This combines PDP (authorization) + PEP (encryption) in a single call
+	// Returns encrypted data ready for database persistence
+	EnforceFilmCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		input FilmCreatePlain,
+	) (FilmCreateEncrypted, error)
 
 	// Hall policies
 	EvaluateHallCreate(
@@ -111,4 +140,14 @@ type PolicyEnforcer interface {
 		reqCtx RequestContext,
 		spectator SpectatorReadInput,
 	) (SpectatorReadResult, error)
+
+	// EnforceSpectatorCreate authorizes, encrypts PII fields AND computes HMAC lookup
+	// This combines PDP (authorization) + PEP (encryption + HMAC) in a single call
+	// Returns encrypted data ready for database persistence with searchable encryption
+	EnforceSpectatorCreate(
+		ctx context.Context,
+		principal Principal,
+		reqCtx RequestContext,
+		input SpectatorCreatePlain,
+	) (SpectatorCreateEncrypted, error)
 }
