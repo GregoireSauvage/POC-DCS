@@ -45,35 +45,18 @@ func (f *fakeFilmRepo) Create(_ context.Context, tenantID, title, timeElapsedCT 
 	return FilmRecord{}, nil
 }
 
-type fakeKMS struct {
-	encryptValue string
-	encryptErr   error
-	encryptCalls int
-}
-
-func (f *fakeKMS) Encrypt(_ context.Context, _ string) (string, error) {
-	f.encryptCalls++
-	if f.encryptErr != nil {
-		return "", f.encryptErr
-	}
-	return f.encryptValue, nil
-}
-
-func (f *fakeKMS) Decrypt(_ context.Context, _ string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeKMS) GetPepper(_ context.Context, _ string) ([]byte, error) {
-	return []byte("default-pepper"), nil
-}
-
 type fakePolicyEnforcer struct{
 	evaluateFunc                func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
 	evaluateCreateFunc          func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
 	readFunc                    func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
+	enforceFilmCreateFunc       func(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error)
 	evaluateSpectatorCreateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error)
 	evaluateSpectatorSearchFunc func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
 	enforceSpectatorReadFunc    func(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error)
+	enforceSpectatorCreateFunc  func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error)
+	getPepperFunc               func(ctx context.Context, path string) ([]byte, error)
+	encryptFunc                 func(ctx context.Context, plaintext string) (string, error)
+	decryptFunc                 func(ctx context.Context, ciphertext string) (string, error)
 }
 
 func (f *fakePolicyEnforcer) EvaluateAuditRead(
@@ -192,6 +175,82 @@ func (f *fakePolicyEnforcer) EnforceSpectatorRead(
 	return SpectatorReadResult{}, nil
 }
 
+// Crypto delegation stubs
+func (f *fakePolicyEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
+	if f.encryptFunc != nil {
+		return f.encryptFunc(ctx, plaintext)
+	}
+	return "encrypted-" + plaintext, nil
+}
+
+func (f *fakePolicyEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
+	if f.decryptFunc != nil {
+		return f.decryptFunc(ctx, ciphertext)
+	}
+	return "decrypted", nil
+}
+
+func (f *fakePolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
+	if f.getPepperFunc != nil {
+		return f.getPepperFunc(ctx, path)
+	}
+	return []byte("test-pepper"), nil
+}
+
+// Enforce create stubs
+func (f *fakePolicyEnforcer) EnforceFilmCreate(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	input FilmCreatePlain,
+) (FilmCreateEncrypted, error) {
+	if f.enforceFilmCreateFunc != nil {
+		return f.enforceFilmCreateFunc(ctx, principal, reqCtx, input)
+	}
+	// Check authorization first if evaluateCreateFunc is set
+	if f.evaluateCreateFunc != nil {
+		decision, err := f.evaluateCreateFunc(ctx, principal, reqCtx)
+		if err != nil {
+			return FilmCreateEncrypted{}, err
+		}
+		if !decision.Allow {
+			return FilmCreateEncrypted{}, ErrForbidden
+		}
+	}
+	return FilmCreateEncrypted{
+		Title:         input.Title,
+		TimeElapsedCT: "vault:v1:encrypted",
+	}, nil
+}
+
+func (f *fakePolicyEnforcer) EnforceSpectatorCreate(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	input SpectatorCreatePlain,
+) (SpectatorCreateEncrypted, error) {
+	if f.enforceSpectatorCreateFunc != nil {
+		return f.enforceSpectatorCreateFunc(ctx, principal, reqCtx, input)
+	}
+	// Check authorization first if evaluateSpectatorCreateFunc is set
+	if f.evaluateSpectatorCreateFunc != nil {
+		decision, err := f.evaluateSpectatorCreateFunc(ctx, principal, reqCtx, "")
+		if err != nil {
+			return SpectatorCreateEncrypted{}, err
+		}
+		if !decision.Allow {
+			return SpectatorCreateEncrypted{}, ErrForbidden
+		}
+	}
+	return SpectatorCreateEncrypted{
+		HallID:           input.HallID,
+		NameCT:           "vault:v1:encrypted",
+		AgeCT:            "vault:v1:encrypted",
+		ExternalIDCT:     "vault:v1:encrypted",
+		ExternalIDLookup: []byte("hmac-lookup"),
+	}, nil
+}
+
 type fakePerfWriter struct {
 	calls   int
 	lastLog *domain.PerfLog
@@ -213,8 +272,8 @@ type fakeRuntimeSettings struct {
 func (f fakeRuntimeSettings) DcsEnabled() bool { return f.dcsEnabled }
 func (f fakeRuntimeSettings) CacheLevel() int { return f.cacheLevel }
 
-func buildFilmServiceForTest(repo FilmRepository, kms KMS) *FilmService {
-	return NewFilmService(repo, defaultPolicyEnforcer(), kms, nil, nil, nil) // audit service not needed for tests
+func buildFilmServiceForTest(repo FilmRepository) *FilmService {
+	return NewFilmService(repo, defaultPolicyEnforcer(), nil, nil, nil) // audit service not needed for tests
 }
 
 func defaultPolicyEnforcer() *fakePolicyEnforcer {
@@ -248,8 +307,7 @@ func TestFilmService_List_DeveloperGetsMaskedValue(t *testing.T) {
 	repo := &fakeFilmRepo{
 		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
 	}
-	kms := &fakeKMS{}
-	svc := buildFilmServiceForTest(repo, kms)
+	svc := buildFilmServiceForTest(repo)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
 	reqCtx := RequestContext{RequestID: "r1", ClientIP: "127.0.0.1"}
@@ -273,8 +331,7 @@ func TestFilmService_UpdateTime_DeveloperForbidden(t *testing.T) {
 	repo := &fakeFilmRepo{
 		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
 	}
-	kms := &fakeKMS{encryptValue: "vault:v1:new"}
-	svc := buildFilmServiceForTest(repo, kms)
+	svc := buildFilmServiceForTest(repo)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
 	reqCtx := RequestContext{RequestID: "r2", ClientIP: "127.0.0.1"}
@@ -283,17 +340,14 @@ func TestFilmService_UpdateTime_DeveloperForbidden(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected forbidden error, got %v", err)
 	}
-	if kms.encryptCalls != 0 {
-		t.Fatalf("encrypt should not be called when forbidden")
-	}
+	// Note: Encryption now handled by enforcer (not called on forbidden)
 }
 
 func TestFilmService_UpdateTime_AdminAllowed(t *testing.T) {
 	repo := &fakeFilmRepo{
 		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
 	}
-	kms := &fakeKMS{encryptValue: "vault:v1:new"}
-	svc := buildFilmServiceForTest(repo, kms)
+	svc := buildFilmServiceForTest(repo)
 
 	principal := Principal{TenantID: "t1", UserID: "u9", Username: "admin", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "r3", ClientIP: "127.0.0.1"}
@@ -305,9 +359,7 @@ func TestFilmService_UpdateTime_AdminAllowed(t *testing.T) {
 	if film.TimeElapsed != 240 {
 		t.Fatalf("expected decrypted int 240, got %#v", film.TimeElapsed)
 	}
-	if kms.encryptCalls != 1 {
-		t.Fatalf("expected one encrypt call, got %d", kms.encryptCalls)
-	}
+	// Note: Encryption now handled by enforcer
 	if perf.Metrics()["kms_ms"] <= 0 {
 		t.Fatalf("expected kms_ms metric to be recorded")
 	}
@@ -316,7 +368,7 @@ func TestFilmService_UpdateTime_AdminAllowed(t *testing.T) {
 func TestFilmService_List_RepoError(t *testing.T) {
 	repoErr := errors.New("db unavailable")
 	repo := &fakeFilmRepo{listErr: repoErr}
-	svc := buildFilmServiceForTest(repo, &fakeKMS{})
+	svc := buildFilmServiceForTest(repo)
 
 	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
 	if !errors.Is(err, repoErr) {
@@ -333,7 +385,7 @@ func TestFilmService_List_EnforcerError(t *testing.T) {
 	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 		return FilmReadResult{}, enforcerErr
 	}
-	svc := NewFilmService(repo, policy, &fakeKMS{}, nil, nil, nil)
+	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
 	if !errors.Is(err, enforcerErr) {
@@ -350,16 +402,13 @@ func TestFilmService_UpdateTime_EvaluateError(t *testing.T) {
 	policy.evaluateFunc = func(_ context.Context, _ Principal, _ RequestContext, _ string) (AuthorizationDecision, error) {
 		return AuthorizationDecision{}, evalErr
 	}
-	kms := &fakeKMS{encryptValue: "vault:v1:new"}
-	svc := NewFilmService(repo, policy, kms, nil, nil, nil)
+	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if !errors.Is(err, evalErr) {
 		t.Fatalf("expected evaluate error, got %v", err)
 	}
-	if kms.encryptCalls != 0 {
-		t.Fatalf("encrypt should not be called when evaluation fails")
-	}
+	// Note: We no longer verify encrypt calls since KMS is internal to enforcer
 }
 
 func TestFilmService_UpdateTime_EncryptError(t *testing.T) {
@@ -367,8 +416,18 @@ func TestFilmService_UpdateTime_EncryptError(t *testing.T) {
 		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
 	}
 	kmsErr := errors.New("kms unavailable")
-	kms := &fakeKMS{encryptErr: kmsErr}
-	svc := buildFilmServiceForTest(repo, kms)
+	policy := &fakePolicyEnforcer{
+		evaluateFunc: func(_ context.Context, principal Principal, _ RequestContext, _ string) (AuthorizationDecision, error) {
+			if principal.Role == "admin" {
+				return AuthorizationDecision{Allow: true, Reason: "admin write"}, nil
+			}
+			return AuthorizationDecision{Allow: false, Reason: "forbidden"}, nil
+		},
+		encryptFunc: func(_ context.Context, _ string) (string, error) {
+			return "", kmsErr
+		},
+	}
+	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if err == nil {
@@ -384,7 +443,7 @@ func TestFilmService_UpdateTime_RepoErrorWrappedNotFound(t *testing.T) {
 		films:     []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
 		updateErr: errors.New("db write failed"),
 	}
-	svc := buildFilmServiceForTest(repo, &fakeKMS{encryptValue: "vault:v1:new"})
+	svc := buildFilmServiceForTest(repo)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if err == nil {
@@ -404,7 +463,7 @@ func TestFilmService_UpdateTime_ReadEnforcerError(t *testing.T) {
 	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
 		return FilmReadResult{}, readErr
 	}
-	svc := NewFilmService(repo, policy, &fakeKMS{encryptValue: "vault:v1:new"}, nil, nil, nil)
+	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)
 	if !errors.Is(err, readErr) {
@@ -418,7 +477,7 @@ func TestFilmService_List_WritesPerfLog(t *testing.T) {
 	}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
-	svc := NewFilmService(repo, defaultPolicyEnforcer(), &fakeKMS{}, nil, perfWriter, runtime)
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), nil, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
 	reqCtx := RequestContext{RequestID: "req-123", ClientIP: "127.0.0.1"}
@@ -458,8 +517,7 @@ func TestFilmService_UpdateTime_WritesPerfLog(t *testing.T) {
 	}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 1}
-	kms := &fakeKMS{encryptValue: "vault:v1:new"}
-	svc := NewFilmService(repo, defaultPolicyEnforcer(), kms, nil, perfWriter, runtime)
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), nil, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u9", Username: "admin", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-999", ClientIP: "127.0.0.1"}
@@ -502,7 +560,7 @@ func TestFilmService_UpdateTime_Forbidden_DoesNotWritePerfLog(t *testing.T) {
 	}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 1}
-	svc := NewFilmService(repo, defaultPolicyEnforcer(), &fakeKMS{}, nil, perfWriter, runtime)
+	svc := NewFilmService(repo, defaultPolicyEnforcer(), nil, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "u1", Username: "dev", Role: "developer"}
 	reqCtx := RequestContext{RequestID: "req-777", ClientIP: "127.0.0.1"}

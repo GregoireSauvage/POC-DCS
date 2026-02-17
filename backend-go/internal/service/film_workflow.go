@@ -16,6 +16,21 @@ var (
 	ErrDCSNotConfigured = errors.New("DCS enforcer not configured - perf endpoints require DCS")
 )
 
+// ForbiddenError wraps a forbidden error with additional context for audit logging
+type ForbiddenError struct {
+	DecisionHash string
+	Reason       string
+	Details      map[string]interface{}
+}
+
+func (e *ForbiddenError) Error() string {
+	return "forbidden"
+}
+
+func (e *ForbiddenError) Is(target error) bool {
+	return target == ErrForbidden
+}
+
 type FilmRecord struct {
 	TenantID      string
 	ID            string
@@ -35,36 +50,27 @@ type FilmRepository interface {
 	Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmRecord, error)
 }
 
-type KMS interface {
-	Encrypt(ctx context.Context, plaintext string) (string, error)
-	Decrypt(ctx context.Context, ciphertext string) (string, error)
-	GetPepper(ctx context.Context, path string) ([]byte, error)
-}
-
 type FilmService struct {
-	repo      FilmRepository
-	enforcer  PolicyEnforcer
-	encryptor KMS
-	audit     AuditWriter
-	perf      PerfWriter
-	runtime   RuntimeSettings
+	repo     FilmRepository
+	enforcer PolicyEnforcer // Only DCS dependency (handles all crypto)
+	audit    AuditWriter
+	perf     PerfWriter
+	runtime  RuntimeSettings
 }
 
 func NewFilmService(
 	repo FilmRepository,
 	policyEnforcer PolicyEnforcer,
-	kms KMS,
 	audit AuditWriter,
 	perfWriter PerfWriter,
 	runtime RuntimeSettings,
 ) *FilmService {
 	return &FilmService{
-		repo:      repo,
-		enforcer:  policyEnforcer,
-		encryptor: kms,
-		audit:     audit,
-		perf:      perfWriter,
-		runtime:   runtime,
+		repo:     repo,
+		enforcer: policyEnforcer,
+		audit:    audit,
+		perf:     perfWriter,
+		runtime:  runtime,
 	}
 }
 
@@ -76,43 +82,34 @@ func (s *FilmService) Create(
 ) (FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
 
-	// Default time_elapsed to 0 if not provided
-	timeElapsed := input.TimeElapsed
-
-	// Phase 1: Authorization (write action)
-	decision, err := s.enforcer.EvaluateFilmCreate(ctx, principal, reqCtx)
+	// Phase 1: Authorization + Encryption (enforcer handles both)
+	encrypted, err := s.enforcer.EnforceFilmCreate(ctx, principal, reqCtx, FilmCreatePlain{
+		Title:       input.Title,
+		TimeElapsed: input.TimeElapsed,
+	})
 	if err != nil {
-		return FilmOutput{}, pctx, err
-	}
-
-	// Perf log on deny
-	if !decision.Allow {
+		// Enforcer returns ErrForbidden if denied
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
 		}
-		// Audit log for denied create
-		if s.audit != nil {
-			details := map[string]interface{}{
-				"reason":       decision.Reason,
-				"title":        input.Title,
-				"time_elapsed": timeElapsed,
+		// Audit log for deny (Python parity)
+		if errors.Is(err, ErrForbidden) && s.audit != nil {
+			// Extract decision hash and details from ForbiddenError if available
+			var forbiddenErr *ForbiddenError
+			decisionHash := ""
+			details := map[string]interface{}(nil)
+			if errors.As(err, &forbiddenErr) {
+				decisionHash = forbiddenErr.DecisionHash
+				details = forbiddenErr.Details
 			}
-			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decision.DecisionHash, details, nil, nil, nil)
+			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decisionHash, details, nil, nil, nil)
 		}
-		return FilmOutput{}, pctx, ErrForbidden
+		return FilmOutput{}, pctx, err
 	}
 
-	// Phase 2: Encrypt sensitive data (time_elapsed)
-	stop := perf.Span(ctx, "kms_ms")
-	ciphertext, err := s.encryptor.Encrypt(ctx, strconv.Itoa(timeElapsed))
-	stop()
-	if err != nil {
-		return FilmOutput{}, pctx, fmt.Errorf("encrypt time_elapsed: %w", err)
-	}
-
-	// Phase 3: Persist to database
-	stop = perf.Span(ctx, "db_ms")
-	created, err := s.repo.Create(ctx, principal.TenantID, input.Title, ciphertext)
+	// Phase 2: Persist (data already encrypted by enforcer)
+	stop := perf.Span(ctx, "db_ms")
+	created, err := s.repo.Create(ctx, principal.TenantID, encrypted.Title, encrypted.TimeElapsedCT)
 	stop()
 	if err != nil {
 		return FilmOutput{}, pctx, fmt.Errorf("create film: %w", err)
@@ -131,12 +128,11 @@ func (s *FilmService) Create(
 	// Phase 5: Audit logging (graceful degradation if audit service is nil)
 	if s.audit != nil {
 		details := map[string]interface{}{
-			"reason":           decision.Reason,
 			"title":            input.Title,
-			"new_time_elapsed": timeElapsed,
+			"new_time_elapsed": input.TimeElapsed,
 			"film_id":          created.ID,
 		}
-		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.ID, "allow", decision.DecisionHash, details,
+		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.ID, "allow", "", details,
 			result.FieldsDecrypted, result.FieldsMasked, result.FieldsDenied)
 	}
 
@@ -233,7 +229,7 @@ func (s *FilmService) UpdateTime(
 	}
 
 	stop := perf.Span(ctx, "kms_ms")
-	ciphertext, err := s.encryptor.Encrypt(ctx, strconv.Itoa(timeElapsed))
+	ciphertext, err := s.enforcer.Encrypt(ctx, strconv.Itoa(timeElapsed))
 	stop()
 	if err != nil {
 		return FilmOutput{}, pctx, fmt.Errorf("encrypt time_elapsed: %w", err)

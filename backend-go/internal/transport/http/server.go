@@ -51,7 +51,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	})
 
 	// Create KMS client (Vault Transit if configured, otherwise local mock)
-	var kmsClient service.KMS
+	var kmsClient enforcer.CryptoService
 	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
 		logger.Info("using Vault Transit KMS")
 		vaultClient, err := kms.NewVaultTransitClient(
@@ -115,7 +115,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	engine := pdp.NewEngine(rt, cm)
 	filmApplier := pep.NewFilmApplier(rt, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	policyEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, kmsClient)
+	policyEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
 
 	// Create audit service if DB available
 	var auditService *service.AuditService
@@ -141,7 +141,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("performance logging disabled (no database)")
 	}
 
-	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, kmsClient, auditService, perfSvc, rt)
+	filmFlow := service.NewFilmService(filmRepo, policyEnforcer, auditService, perfSvc, rt)
 
 	// Create hall repository (PostgreSQL if DB available, otherwise in-memory)
 	var hallRepo service.HallRepository
@@ -169,12 +169,10 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 	spectatorService := service.NewSpectatorService(
 		spectatorRepo,
 		hallRepo,
-		kmsClient,
 		policyEnforcer,
 		auditService,
 		perfSvc,
 		rt,
-		cfg.VaultKVPepperPath,
 	)
 
 	// Create JWT service

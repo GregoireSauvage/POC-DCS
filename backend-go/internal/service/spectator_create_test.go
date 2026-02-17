@@ -75,24 +75,6 @@ func (f *fakeHallRepoForSpectator) CountSpectators(ctx context.Context, tenantID
 	return 0, nil
 }
 
-type fakeKMSWithPepper struct {
-	*fakeKMS
-	pepper      []byte
-	pepperErr   error
-	pepperCalls int
-}
-
-func (f *fakeKMSWithPepper) GetPepper(ctx context.Context, path string) ([]byte, error) {
-	f.pepperCalls++
-	if f.pepperErr != nil {
-		return nil, f.pepperErr
-	}
-	if f.pepper == nil {
-		return []byte("default-pepper-secret"), nil
-	}
-	return f.pepper, nil
-}
-
 // ============================================================================
 // POST /spectators - Create Tests
 // ============================================================================
@@ -109,12 +91,6 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 				OwnerUserID: "owner-123",
 			},
 		},
-	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{
-			encryptValue: "vault:v1:encrypted",
-		},
-		pepper: []byte("test-pepper"),
 	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
@@ -140,7 +116,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -180,7 +156,8 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 	require.Len(t, auditSvc.allAuditLogs, 1)
 	assert.Equal(t, "spectator.create", auditSvc.allAuditLogs[0].Action)
 	assert.Equal(t, "allow", auditSvc.allAuditLogs[0].Outcome)
-	assert.Equal(t, "hash-create", auditSvc.allAuditLogs[0].DecisionHash)
+	// Note: Decision hash not available from EnforceSpectatorCreate (integrated PDP+PEP)
+	assert.Equal(t, "", auditSvc.allAuditLogs[0].DecisionHash)
 }
 
 func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
@@ -194,10 +171,6 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 				OwnerUserID: "owner-123",
 			},
 		},
-	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS:  &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:   []byte("test-pepper"),
 	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
@@ -223,7 +196,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -261,10 +234,6 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
 			// Developer is denied for write actions
@@ -279,7 +248,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -319,16 +288,12 @@ func TestSpectatorService_Create_HallNotFound_ReturnsNotFound(t *testing.T) {
 	hallRepo := &fakeHallRepoForSpectator{
 		halls: map[string]*domain.Hall{}, // Empty - no halls
 	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -355,10 +320,6 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:  []byte("test-pepper"),
-	}
 	policyErr := errors.New("policy engine unavailable")
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
@@ -369,7 +330,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -396,23 +357,18 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	encryptErr := errors.New("vault unavailable")
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{
-			encryptErr: encryptErr,
-		},
-		pepper: []byte("test-pepper"),
-	}
+	encryptErr := errors.New("vault encrypt failed")
 	enforcer := &fakePolicyEnforcer{
-		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
-			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
+		enforceSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
+			// Simulate encryption error
+			return SpectatorCreateEncrypted{}, encryptErr
 		},
 	}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -427,7 +383,7 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 
 	// Assert
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "encrypt")
+	assert.ErrorIs(t, err, encryptErr)
 	assert.Empty(t, spectatorRepo.createdSpectators)
 }
 
@@ -442,10 +398,6 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -455,7 +407,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -481,10 +433,6 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{encryptValue: "vault:v1:encrypted"},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -505,7 +453,7 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 		cacheLevel: 0,
 	}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",

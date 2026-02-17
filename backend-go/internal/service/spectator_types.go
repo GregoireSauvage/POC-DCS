@@ -13,12 +13,31 @@ type SpectatorRepository interface {
 	CountByHall(ctx context.Context, tenantID, hallID string) (int, error)
 }
 
-// SpectatorCreateInput is the input for creating a spectator
+// SpectatorCreateInput is the HTTP request input for creating a spectator
 type SpectatorCreateInput struct {
+	HallID     string `json:"hall_id"`
+	Name       string `json:"name"`
+	Age        int    `json:"age"`
+	ExternalID string `json:"external_id"`
+}
+
+// SpectatorCreatePlain represents plaintext spectator data before encryption
+// Used as input to DCS enforcer for authorization + encryption
+type SpectatorCreatePlain struct {
 	HallID     string
 	Name       string
 	Age        int
 	ExternalID string
+}
+
+// SpectatorCreateEncrypted represents spectator data after encryption by DCS enforcer
+// Ready for database persistence, includes HMAC lookup for searchable encryption
+type SpectatorCreateEncrypted struct {
+	HallID           string
+	NameCT           string // Encrypted name
+	AgeCT            string // Encrypted age
+	ExternalIDCT     string // Encrypted external_id
+	ExternalIDLookup []byte // HMAC for searchable encryption
 }
 
 // SpectatorOutput is the API response structure for a spectator

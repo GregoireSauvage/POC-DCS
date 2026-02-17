@@ -147,6 +147,39 @@ func (m *mockPolicyEnforcer) EnforceSpectatorRead(
 	return service.SpectatorReadResult{}, nil
 }
 
+func (m *mockPolicyEnforcer) EnforceFilmCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	input service.FilmCreatePlain,
+) (service.FilmCreateEncrypted, error) {
+	return service.FilmCreateEncrypted{
+		Title:         input.Title,
+		TimeElapsedCT: "vault:v1:encrypted",
+	}, nil
+}
+
+func (m *mockPolicyEnforcer) EnforceSpectatorCreate(
+	ctx context.Context,
+	principal service.Principal,
+	reqCtx service.RequestContext,
+	input service.SpectatorCreatePlain,
+) (service.SpectatorCreateEncrypted, error) {
+	return service.SpectatorCreateEncrypted{}, nil
+}
+
+func (m *mockPolicyEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
+	return "vault:v1:encrypted", nil
+}
+
+func (m *mockPolicyEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
+	return "decrypted", nil
+}
+
+func (m *mockPolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
+	return []byte("test-pepper"), nil
+}
+
 func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enforcer *mockPolicyEnforcer) (*Server, string, *mockAuditLogRepository) {
 	t.Helper()
 	cfg := &config.Config{

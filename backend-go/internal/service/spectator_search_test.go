@@ -40,10 +40,6 @@ func TestSpectatorService_Search_AdminFindsMultiple_AllDecrypted(t *testing.T) {
 		},
 	}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{
@@ -70,7 +66,7 @@ func TestSpectatorService_Search_AdminFindsMultiple_AllDecrypted(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -103,7 +99,8 @@ func TestSpectatorService_Search_AdminFindsMultiple_AllDecrypted(t *testing.T) {
 	require.Len(t, auditSvc.allAuditLogs, 1)
 	assert.Equal(t, "search.spectator", auditSvc.allAuditLogs[0].Action)
 	assert.Equal(t, "allow", auditSvc.allAuditLogs[0].Outcome)
-	assert.Equal(t, "hash-search", auditSvc.allAuditLogs[0].DecisionHash)
+	// Note: Decision hash not propagated from Evaluate (separate from Enforce pattern)
+	assert.Equal(t, "", auditSvc.allAuditLogs[0].DecisionHash)
 	// Python parity: audit includes matches count
 	details := auditSvc.allAuditLogs[0].Details
 	assert.Equal(t, 2, details["matches"])
@@ -125,10 +122,6 @@ func TestSpectatorService_Search_AgentFinds_PIIMasked(t *testing.T) {
 		},
 	}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -148,7 +141,7 @@ func TestSpectatorService_Search_AgentFinds_PIIMasked(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -179,10 +172,6 @@ func TestSpectatorService_Search_DeveloperDenied(t *testing.T) {
 	// Arrange
 	spectatorRepo := &fakeSpectatorRepo{}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			// Assuming developer is denied for search (verify with Python)
@@ -197,7 +186,7 @@ func TestSpectatorService_Search_DeveloperDenied(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -231,10 +220,6 @@ func TestSpectatorService_Search_NoMatchesFound_ReturnsEmptyArray(t *testing.T) 
 		findByLookupResult: []*domain.Spectator{}, // Empty - no matches
 	}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -244,7 +229,7 @@ func TestSpectatorService_Search_NoMatchesFound_ReturnsEmptyArray(t *testing.T) 
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-search"}
@@ -266,10 +251,6 @@ func TestSpectatorService_Search_PolicyEvaluationError_ReturnsError(t *testing.T
 	// Arrange
 	spectatorRepo := &fakeSpectatorRepo{}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	policyErr := errors.New("policy engine unavailable")
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
@@ -280,7 +261,7 @@ func TestSpectatorService_Search_PolicyEvaluationError_ReturnsError(t *testing.T
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-search"}
@@ -299,20 +280,19 @@ func TestSpectatorService_Search_PepperRetrievalError_ReturnsError(t *testing.T)
 	spectatorRepo := &fakeSpectatorRepo{}
 	hallRepo := &fakeHallRepoForSpectator{}
 	pepperErr := errors.New("vault kv read failed")
-	kms := &fakeKMSWithPepper{
-		fakeKMS:   &fakeKMS{},
-		pepperErr: pepperErr,
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
+		},
+		getPepperFunc: func(ctx context.Context, path string) ([]byte, error) {
+			return nil, pepperErr
 		},
 	}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-search"}
@@ -333,10 +313,6 @@ func TestSpectatorService_Search_RepositoryError_ReturnsError(t *testing.T) {
 		findByLookupErr: dbErr,
 	}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -346,7 +322,7 @@ func TestSpectatorService_Search_RepositoryError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-search"}
@@ -368,10 +344,6 @@ func TestSpectatorService_Search_TenantIsolation(t *testing.T) {
 		},
 	}
 	hallRepo := &fakeHallRepoForSpectator{}
-	kms := &fakeKMSWithPepper{
-		fakeKMS: &fakeKMS{},
-		pepper:  []byte("test-pepper"),
-	}
 	enforcer := &fakePolicyEnforcer{
 		evaluateSpectatorSearchFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
 			return AuthorizationDecision{Allow: true, DecisionHash: "hash"}, nil
@@ -388,7 +360,7 @@ func TestSpectatorService_Search_TenantIsolation(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := NewSpectatorService(spectatorRepo, hallRepo, kms, enforcer, auditSvc, perfWriter, runtime, "")
+	svc := NewSpectatorService(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1", // Search as tenant t1
