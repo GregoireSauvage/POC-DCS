@@ -41,6 +41,13 @@ Classification (exemples) :
 
 ---
 
+## Lancer la stack:
+```bash
+docker compose up -d
+```
+
+Aller à l'url *http://localhost:8080*.
+
 ## 3) Benchmark de performances
 
 Moyenne du temps de traitement total d'une requete pour l'ecriture et la lecture d'un film, pour chacun des deux backend et selon le niveau de cache + l'activation ou non du DCS. </br>
