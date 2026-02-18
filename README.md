@@ -582,10 +582,9 @@ Client    HTTP      Service      Enforcer    PIP    PDP    PEP    KMS    Repo   
   │       │          │──Evaluate─>│         │      │      │      │      │      │
   │       │          │            │──Build->│      │      │      │      │      │
   │       │          │            │<────────│      │      │      │      │      │
-  │       │          │            │─────Eval────>│ │      │      │      │      │
-  │       │          │            │<──Decision───│ │      │      │      │      │
-  │       │          │<───────────│         │      │      │      │      │      │
-  │       │          │──Encrypt──────────────────────────>│      │      │      │
+  │       │          │            │─────Eval──────>│      │      │      │      │
+  │       │          │            │<──Decision─────│      │      │      │      │
+  │       │          │            |───Encrypt────────────>│      │      │      │
   │       │          │<────CT─────────────────────────────│      │      │      │
   │       │          │──────────────────────────────────Insert──>│      │      │
   │       │          │<───────────────────────────────────Record─│      │      │
@@ -743,7 +742,6 @@ Ce que le PoC montre bien :
 - chiffrement direct via KMS (pas encore envelope encryption)
 - authN/authZ simplifiés (seed users, pas d'IdP, pas de rotation JWT)
 - réseau "minimal" (pas mTLS, pas d'attestation device)
-- policies "policy-as-code" dans le repo (pas de PAP dédié ni workflow de déploiement des politiques)
 
 ### 7.1 Comparaison Backend Python vs Go
 
