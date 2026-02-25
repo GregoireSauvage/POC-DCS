@@ -3,12 +3,9 @@ package http
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 )
 
 // Test helpers moved to testing.go for reusability
@@ -120,9 +117,14 @@ func TestServer_PerfServiceNilWhenNoDB(t *testing.T) {
 }
 
 func TestServer_PerfServiceWiredWhenDBProvided(t *testing.T) {
-	db := &postgres.Pool{}
-	s := NewServerLegacy(testConfig(), slog.Default(), db)
+	// Create a mock perf service (simulates having DB)
+	mockPerfSvc := &mockPerfService{}
+
+	s := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
+		b.WithPerfService(mockPerfSvc)
+	})
+
 	if s.perfService == nil {
-		t.Fatalf("expected perfService wired when DB provided")
+		t.Fatalf("expected perfService wired when provided")
 	}
 }
