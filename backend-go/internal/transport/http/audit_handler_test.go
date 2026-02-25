@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -182,33 +181,22 @@ func (m *mockPolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte
 
 func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enforcer *mockPolicyEnforcer) (*Server, string, *mockAuditLogRepository) {
 	t.Helper()
-	cfg := &config.Config{
-		Env:             "dev",
-		Service:         "backend-go-test",
-		HTTPAddr:        ":0",
-		GRPCAddr:        ":0",
-		LogLevel:        slog.LevelError,
-		DCSMode:         "on",
-		CacheLevel:      1,
-		CacheMaxEntries: 100,
-		JWTSecret:       "test-secret",
-		JWTIssuer:       "test-issuer",
-		JWTAudience:     "test-audience",
-		JWTTTLMin:       60,
-	}
 
-	server := NewServer(cfg, slog.Default(), nil)
-
-	// Create audit service with mock repository and enforcer
-	if auditRepo != nil {
+	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
 		// If no enforcer provided, create a default one that allows
 		if enforcer == nil {
 			enforcer = &mockPolicyEnforcer{
 				auditDecision: service.AuthorizationDecision{Allow: true, Reason: "test_allow"},
 			}
 		}
-		server.auditService = service.NewAuditService(auditRepo, enforcer, slog.Default())
-	}
+		b.WithEnforcer(enforcer)
+
+		// Create audit service with mock repository if provided
+		if auditRepo != nil {
+			auditService := service.NewAuditService(auditRepo, enforcer, slog.Default())
+			b.WithAuditService(auditService)
+		}
+	})
 
 	// Generate admin token
 	adminToken := adminAuthHeader(t, server)

@@ -45,11 +45,13 @@ func TestGetHalls_AdminSeesAllFields(t *testing.T) {
 }
 
 func TestGetHalls_DeveloperSeesMaskedINTERNAL(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "user-12345678", CurrentFilmID: "film-87654321"},
 	})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
+		hallService := service.NewHallService(hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
+		b.WithHallService(hallService)
+	})
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
@@ -79,11 +81,13 @@ func TestGetHalls_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 }
 
 func TestGetHalls_AgentSeesINTERNAL(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-agent", CurrentFilmID: "film-1"},
 	})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
+		hallService := service.NewHallService(hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
+		b.WithHallService(hallService)
+	})
 
 	token, _ := server.jwtService.GenerateToken(types.Principal{
 		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},

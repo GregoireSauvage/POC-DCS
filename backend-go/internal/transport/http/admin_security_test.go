@@ -3,35 +3,18 @@ package http
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
 func newTestServerWithAuth(t *testing.T) (*Server, *auth.JWTService) {
 	t.Helper()
-	cfg := &config.Config{
-		Env:             "dev",
-		Service:         "backend-go-test",
-		HTTPAddr:        ":0",
-		GRPCAddr:        ":0",
-		LogLevel:        slog.LevelError,
-		DCSMode:         "on",
-		CacheLevel:      1,
-		CacheMaxEntries: 100,
-		JWTSecret:       "test-secret",
-		JWTIssuer:       "test-issuer",
-		JWTAudience:     "test-audience",
-		JWTTTLMin:       60,
-	}
-	server := NewServer(cfg, slog.Default(), nil) // nil DB for test
-	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
-	return server, jwtSvc
+	server := newTestServer(t)
+	return server, server.jwtService
 }
 
 func generateToken(t *testing.T, jwtSvc *auth.JWTService, role string) string {

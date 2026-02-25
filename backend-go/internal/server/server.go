@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/neoweyss/poc-dcs/backend-go/internal/bootstrap"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	grpctransport "github.com/neoweyss/poc-dcs/backend-go/internal/transport/grpc"
@@ -39,11 +40,14 @@ func New(cfg *config.Config, logger *slog.Logger) *App {
 		logger.Warn("no DATABASE_URL provided, using in-memory repository")
 	}
 
+	// Build HTTP dependencies using composition root
+	httpDeps := bootstrap.BuildHTTPDependencies(ctx, cfg, logger.With(slog.String("transport", "http")), db)
+
 	return &App{
 		cfg:        cfg,
 		logger:     logger,
 		db:         db,
-		httpServer: httptransport.NewServer(cfg, logger.With(slog.String("transport", "http")), db),
+		httpServer: httptransport.NewServer(httpDeps),
 		grpcServer: grpctransport.NewServer(cfg, logger.With(slog.String("transport", "grpc"))),
 	}
 }

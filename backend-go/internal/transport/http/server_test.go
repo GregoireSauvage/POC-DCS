@@ -8,48 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 )
 
-func testConfig() *config.Config {
-	return &config.Config{
-		Env:             "dev",
-		Service:         "backend-go-test",
-		HTTPAddr:        ":0",
-		GRPCAddr:        ":0",
-		LogLevel:        slog.LevelError,
-		DCSMode:         "on",
-		CacheLevel:      1,
-		CacheMaxEntries: 100,
-		PerfSource:      "go",
-		JWTSecret:       "test-secret",
-		JWTIssuer:       "test-issuer",
-		JWTAudience:     "test-audience",
-		JWTTTLMin:       60,
-	}
-}
-
-func newTestServer(t *testing.T) *Server {
-	t.Helper()
-	return NewServer(testConfig(), slog.Default(), nil) // nil DB for test
-}
-
-func adminAuthHeader(t *testing.T, s *Server) string {
-	t.Helper()
-	token, err := s.jwtService.GenerateToken(
-		types.Principal{
-			UserID:   "admin-id",
-			TenantID: "t1",
-			Username: "admin",
-			Role:     "admin",
-		})
-	if err != nil {
-		t.Fatalf("failed to generate admin token: %v", err)
-	}
-	return "Bearer " + token
-}
+// Test helpers moved to testing.go for reusability
 
 func TestServer_AdminSettingsRoundTrip(t *testing.T) {
 	s := newTestServer(t)
@@ -159,7 +121,7 @@ func TestServer_PerfServiceNilWhenNoDB(t *testing.T) {
 
 func TestServer_PerfServiceWiredWhenDBProvided(t *testing.T) {
 	db := &postgres.Pool{}
-	s := NewServer(testConfig(), slog.Default(), db)
+	s := NewServerLegacy(testConfig(), slog.Default(), db)
 	if s.perfService == nil {
 		t.Fatalf("expected perfService wired when DB provided")
 	}

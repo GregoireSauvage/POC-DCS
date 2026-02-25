@@ -41,7 +41,44 @@ type Server struct {
 	jwtService       *auth.JWTService
 }
 
-func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
+// NewServer creates a new HTTP server with pre-constructed dependencies (Composition Root Pattern)
+// This is the primary constructor - all dependencies must be built externally and passed in
+func NewServer(deps Dependencies) *Server {
+	mux := nethttp.NewServeMux()
+
+	s := &Server{
+		cfg:              deps.Config,
+		logger:           deps.Logger,
+		mux:              mux,
+		runtime:          deps.Runtime,
+		cache:            deps.Cache,
+		enforcer:         deps.Enforcer,
+		filmFlow:         deps.FilmService,
+		hallService:      deps.HallService,
+		spectatorService: deps.SpectatorService,
+		authService:      deps.AuthService,
+		auditService:     deps.AuditService,
+		perfService:      deps.PerfService,
+		jwtService:       deps.JWTService,
+		server: &nethttp.Server{
+			Addr:              deps.Config.HTTPAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		},
+	}
+	s.registerRoutes()
+	return s
+}
+
+// NewServerLegacy creates a new HTTP server with the old constructor signature
+// DEPRECATED: Use NewServer(deps) instead. This exists only for backward compatibility during migration.
+func NewServerLegacy(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
+	deps := buildDependenciesLegacy(cfg, logger, db)
+	return NewServer(deps)
+}
+
+// buildDependenciesLegacy constructs dependencies using the old approach (for backward compatibility)
+func buildDependenciesLegacy(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) Dependencies {
 	// Load DCS config (PIP + PDP rules)
 	var dcsCfg *dcsconfig.DCSConfig
 	if cfg.DCSConfigPath != "" {
@@ -220,30 +257,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Serv
 		logger.Warn("authentication service disabled (no database)")
 	}
 
-	mux := nethttp.NewServeMux()
-
-	s := &Server{
-		cfg:              cfg,
-		logger:           logger,
-		mux:              mux,
-		runtime:          rt,
-		cache:            cm,
-		enforcer:         policyEnforcer,
-		filmFlow:         filmFlow,
-		hallService:      hallService,
-		spectatorService: spectatorService,
-		authService:      authSvc,
-		auditService:     auditService,
-		perfService:      perfSvc,
-		jwtService:       jwtSvc,
-		server: &nethttp.Server{
-			Addr:              cfg.HTTPAddr,
-			Handler:           mux,
-			ReadHeaderTimeout: 10 * time.Second,
-		},
+	return Dependencies{
+		Config:           cfg,
+		Logger:           logger,
+		Runtime:          rt,
+		Cache:            cm,
+		Enforcer:         policyEnforcer,
+		FilmService:      filmFlow,
+		HallService:      hallService,
+		SpectatorService: spectatorService,
+		AuthService:      authSvc,
+		AuditService:     auditService,
+		PerfService:      perfSvc,
+		JWTService:       jwtSvc,
 	}
-	s.registerRoutes()
-	return s
 }
 
 func (s *Server) Handler() nethttp.Handler {
