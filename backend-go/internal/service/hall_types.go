@@ -49,12 +49,23 @@ type HallReadResult struct {
 	FieldsDenied  []string
 }
 
+type HallReadView struct {
+	Output       HallOutput
+	FieldsMasked []string
+	FieldsDenied []string
+}
+
 // HallRepository defines hall data access operations
 type HallRepository interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]HallRecord, error)
 	Create(ctx context.Context, hall *domain.Hall) error
 	CountSpectators(ctx context.Context, tenantID string, hallID string) (int, error)
 	FindByID(ctx context.Context, tenantID string, hallID string) (*domain.Hall, error)
+}
+
+type SecureHallRepository interface {
+	ListByTenant(ctx context.Context, tenantID string) ([]HallReadView, error)
+	Create(ctx context.Context, hall *domain.Hall) (HallReadView, error)
 }
 
 // HallService defines hall business operations

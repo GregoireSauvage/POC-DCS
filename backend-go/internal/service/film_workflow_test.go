@@ -6,46 +6,85 @@ import (
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
 type fakeFilmRepo struct {
 	films     []FilmRecord
 	listErr   error
 	updateErr error
+	secureErr error
 }
 
-func (f *fakeFilmRepo) ListByTenant(_ context.Context, tenantID string) ([]FilmRecord, error) {
+func (f *fakeFilmRepo) ListByTenant(ctx context.Context, tenantID string) ([]FilmReadView, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	out := make([]FilmRecord, 0, len(f.films))
+	stop := perf.Span(ctx, "db_ms")
+	defer stop()
+	out := make([]FilmReadView, 0, len(f.films))
 	for _, film := range f.films {
 		if film.TenantID == tenantID {
-			out = append(out, film)
+			view, err := f.buildView(ctx, film)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, view)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeFilmRepo) UpdateTimeCiphertext(_ context.Context, tenantID, filmID, ciphertext string) (FilmRecord, error) {
+func (f *fakeFilmRepo) UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (FilmReadView, error) {
 	if f.updateErr != nil {
-		return FilmRecord{}, f.updateErr
+		return FilmReadView{}, f.updateErr
 	}
+	stop := perf.Span(ctx, "db_ms")
+	defer stop()
 	for i := range f.films {
 		if f.films[i].TenantID == tenantID && f.films[i].ID == filmID {
 			f.films[i].TimeElapsedCT = ciphertext
-			return f.films[i], nil
+			return f.buildView(ctx, f.films[i])
 		}
 	}
-	return FilmRecord{}, errors.New("not found")
+	return FilmReadView{}, errors.New("not found")
 }
 
-func (f *fakeFilmRepo) Create(_ context.Context, tenantID, title, timeElapsedCT string) (FilmRecord, error) {
-	// Stub implementation - not used in most tests
-	return FilmRecord{}, nil
+func (f *fakeFilmRepo) Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmReadView, error) {
+	stop := perf.Span(ctx, "db_ms")
+	defer stop()
+	record := FilmRecord{TenantID: tenantID, ID: "generated-uuid-123", Title: title, TimeElapsedCT: timeElapsedCT}
+	return f.buildView(ctx, record)
 }
 
-type fakePolicyEnforcer struct{
+func (f *fakeFilmRepo) buildView(ctx context.Context, record FilmRecord) (FilmReadView, error) {
+	if f.secureErr != nil {
+		return FilmReadView{}, f.secureErr
+	}
+	access, ok := AccessContextFromContext(ctx)
+	if !ok {
+		return FilmReadView{}, ErrForbidden
+	}
+
+	view := FilmReadView{
+		Output: FilmOutput{
+			ID:    record.ID,
+			Title: record.Title,
+		},
+	}
+
+	if access.Principal.Role == "admin" {
+		view.Output.TimeElapsed = 240
+		view.FieldsDecrypted = []string{"time_elapsed"}
+		return view, nil
+	}
+
+	view.Output.TimeElapsed = "1***"
+	view.FieldsMasked = []string{"time_elapsed"}
+	return view, nil
+}
+
+type fakePolicyEnforcer struct {
 	evaluateFunc                func(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error)
 	evaluateCreateFunc          func(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error)
 	readFunc                    func(ctx context.Context, principal Principal, reqCtx RequestContext, film FilmReadInput) (FilmReadResult, error)
@@ -270,9 +309,9 @@ type fakeRuntimeSettings struct {
 }
 
 func (f fakeRuntimeSettings) DcsEnabled() bool { return f.dcsEnabled }
-func (f fakeRuntimeSettings) CacheLevel() int { return f.cacheLevel }
+func (f fakeRuntimeSettings) CacheLevel() int  { return f.cacheLevel }
 
-func buildFilmServiceForTest(repo FilmRepository) *FilmService {
+func buildFilmServiceForTest(repo SecureFilmRepository) *FilmService {
 	return NewFilmService(repo, defaultPolicyEnforcer(), nil, nil, nil) // audit service not needed for tests
 }
 
@@ -378,13 +417,11 @@ func TestFilmService_List_RepoError(t *testing.T) {
 
 func TestFilmService_List_EnforcerError(t *testing.T) {
 	repo := &fakeFilmRepo{
-		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+		films:     []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+		secureErr: errors.New("pep failure"),
 	}
-	enforcerErr := errors.New("pep failure")
+	enforcerErr := repo.secureErr
 	policy := defaultPolicyEnforcer()
-	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
-		return FilmReadResult{}, enforcerErr
-	}
 	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
@@ -449,20 +486,21 @@ func TestFilmService_UpdateTime_RepoErrorWrappedNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected repository update error")
 	}
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound wrapper, got %v", err)
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected raw repository error, got not found wrapper %v", err)
+	}
+	if err.Error() != "db write failed" {
+		t.Fatalf("expected raw repository error, got %v", err)
 	}
 }
 
 func TestFilmService_UpdateTime_ReadEnforcerError(t *testing.T) {
 	repo := &fakeFilmRepo{
-		films: []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+		films:     []FilmRecord{{TenantID: "t1", ID: "f1", Title: "Interstellar", TimeElapsedCT: "vault:v1:abc"}},
+		secureErr: errors.New("read enforcement failed"),
 	}
-	readErr := errors.New("read enforcement failed")
+	readErr := repo.secureErr
 	policy := defaultPolicyEnforcer()
-	policy.readFunc = func(_ context.Context, _ Principal, _ RequestContext, _ FilmReadInput) (FilmReadResult, error) {
-		return FilmReadResult{}, readErr
-	}
 	svc := NewFilmService(repo, policy, nil, nil, nil)
 
 	_, _, err := svc.UpdateTime(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, "f1", 240)

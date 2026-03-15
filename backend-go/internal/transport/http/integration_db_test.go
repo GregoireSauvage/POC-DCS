@@ -21,6 +21,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
+	securedrepo "github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres/secured"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -93,9 +94,12 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	// Services
 	auditService := service.NewAuditService(auditRepo, policyEnforcer, logger)
 	perfService := service.NewPerfService(perfRepo, policyEnforcer, cfg.PerfSource)
-	filmService := service.NewFilmService(filmRepo, policyEnforcer, auditService, perfService, rt)
-	hallService := service.NewHallService(hallRepo, policyEnforcer, auditService, perfService, rt)
-	spectatorService := service.NewSpectatorService(spectatorRepo, hallRepo, policyEnforcer, auditService, perfService, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, policyEnforcer, logger.With(slog.String("component", "secured_film_repository")))
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, policyEnforcer, logger.With(slog.String("component", "secured_hall_repository")))
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, policyEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
+	filmService := service.NewFilmService(filmSecureRepo, policyEnforcer, auditService, perfService, rt)
+	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, policyEnforcer, auditService, perfService, rt)
+	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, policyEnforcer, auditService, perfService, rt)
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 	authService := service.NewAuthService(userRepo, jwtService)
 

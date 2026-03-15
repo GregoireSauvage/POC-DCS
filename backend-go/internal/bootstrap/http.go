@@ -18,6 +18,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
+	securedrepo "github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres/secured"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 	serviceauth "github.com/neoweyss/poc-dcs/backend-go/internal/service/authorization"
 	httptransport "github.com/neoweyss/poc-dcs/backend-go/internal/transport/http"
@@ -351,13 +352,16 @@ func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, 
 		logger.Warn("performance service disabled (no database)")
 	}
 
-	services.Film = service.NewFilmService(repos.Film, dcs.Enforcer, services.Audit, services.Perf, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(repos.Film, dcs.Enforcer, logger.With(slog.String("component", "secured_film_repository")))
+	services.Film = service.NewFilmService(filmSecureRepo, dcs.Enforcer, services.Audit, services.Perf, rt)
 	logger.Info("film service initialized")
 
-	services.Hall = service.NewHallService(repos.Hall, dcs.Enforcer, services.Audit, services.Perf, rt)
+	hallSecureRepo := securedrepo.NewHallRepository(repos.Hall, dcs.Enforcer, logger.With(slog.String("component", "secured_hall_repository")))
+	services.Hall = service.NewHallServiceWithSecureRepo(repos.Hall, hallSecureRepo, dcs.Enforcer, services.Audit, services.Perf, rt)
 	logger.Info("hall service initialized")
 
-	services.Spectator = service.NewSpectatorService(repos.Spectator, repos.Hall, dcs.Enforcer, services.Audit, services.Perf, rt)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(repos.Spectator, dcs.Enforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
+	services.Spectator = service.NewSpectatorServiceWithSecureRepo(repos.Spectator, spectatorSecureRepo, repos.Hall, dcs.Enforcer, services.Audit, services.Perf, rt)
 	logger.Info("spectator service initialized")
 
 	services.JWT = auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)

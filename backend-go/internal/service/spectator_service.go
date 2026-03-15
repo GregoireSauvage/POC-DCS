@@ -13,16 +13,15 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
-const defaultPepperPath = "secret/dcs" // Python parity: config.VAULT_KV_PEPPER_PATH
-
 // SpectatorService provides spectator business operations
 type SpectatorService struct {
-	repo     SpectatorRepository
-	hallRepo HallRepository
-	enforcer PolicyEnforcer
-	audit    AuditWriter
-	perf     PerfWriter
-	runtime  RuntimeSettings
+	repo       SpectatorRepository
+	secureRepo SecureSpectatorRepository
+	hallRepo   HallRepository
+	enforcer   PolicyEnforcer
+	audit      AuditWriter
+	perf       PerfWriter
+	runtime    RuntimeSettings
 }
 
 // NewSpectatorService creates a new spectator service
@@ -44,6 +43,26 @@ func NewSpectatorService(
 	}
 }
 
+func NewSpectatorServiceWithSecureRepo(
+	repo SpectatorRepository,
+	secureRepo SecureSpectatorRepository,
+	hallRepo HallRepository,
+	enforcer PolicyEnforcer,
+	audit AuditWriter,
+	perf PerfWriter,
+	runtime RuntimeSettings,
+) *SpectatorService {
+	return &SpectatorService{
+		repo:       repo,
+		secureRepo: secureRepo,
+		hallRepo:   hallRepo,
+		enforcer:   enforcer,
+		audit:      audit,
+		perf:       perf,
+		runtime:    runtime,
+	}
+}
+
 // Create creates a new spectator with encrypted PII fields
 func (s *SpectatorService) Create(
 	ctx context.Context,
@@ -52,6 +71,7 @@ func (s *SpectatorService) Create(
 	input SpectatorCreateInput,
 ) (SpectatorOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionSpectatorCreate)
 
 	// 1. Validate hall exists
 	hall, err := s.hallRepo.FindByID(ctx, principal.TenantID, input.HallID)
@@ -99,6 +119,25 @@ func (s *SpectatorService) Create(
 		AgeCT:            encrypted.AgeCT,
 		ExternalIDCT:     encrypted.ExternalIDCT,
 		ExternalIDLookup: encrypted.ExternalIDLookup,
+	}
+
+	if s.secureRepo != nil {
+		view, err := s.secureRepo.Create(ctx, spectator)
+		if err != nil {
+			return SpectatorOutput{}, pctx, err
+		}
+
+		if s.audit != nil {
+			details := map[string]interface{}{"hall_id": input.HallID}
+			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
+				spectator.ID, "allow", "", details,
+				view.FieldsDecrypted, view.FieldsMasked, view.FieldsDenied)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
+		}
+
+		return view.Output, pctx, nil
 	}
 
 	// 4. Insert into DB
@@ -153,6 +192,40 @@ func (s *SpectatorService) Search(
 	externalID string,
 ) ([]SpectatorOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionSearchSpectator)
+
+	if s.secureRepo != nil {
+		views, err := s.secureRepo.SearchByExternalID(ctx, principal.TenantID, externalID)
+		if err != nil {
+			if errors.Is(err, ErrForbidden) {
+				if s.audit != nil {
+					s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
+						"", nil, nil, nil, nil)
+				}
+				if s.perf != nil {
+					s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
+				}
+				return nil, pctx, ErrForbidden
+			}
+			return nil, pctx, err
+		}
+
+		out := make([]SpectatorOutput, 0, len(views))
+		for _, view := range views {
+			out = append(out, view.Output)
+		}
+
+		if s.audit != nil {
+			details := map[string]interface{}{"matches": len(out)}
+			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
+				"", details, nil, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
+		}
+
+		return out, pctx, nil
+	}
 
 	// 1. Evaluate search.spectator policy
 	decision, err := s.enforcer.EvaluateSpectatorSearch(ctx, principal, reqCtx)
@@ -172,7 +245,7 @@ func (s *SpectatorService) Search(
 	}
 
 	// 2. Compute HMAC lookup
-	pepper, err := s.enforcer.GetPepper(ctx, defaultPepperPath)
+	pepper, err := s.enforcer.GetPepper(ctx, DefaultSpectatorPepperPath)
 	if err != nil {
 		return nil, pctx, fmt.Errorf("get pepper: %w", err)
 	}

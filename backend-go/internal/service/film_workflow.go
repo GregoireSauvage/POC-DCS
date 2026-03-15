@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
@@ -44,14 +45,27 @@ type FilmOutput struct {
 	TimeElapsed interface{} `json:"time_elapsed"`
 }
 
+type FilmReadView struct {
+	Output          FilmOutput
+	FieldsDecrypted []string
+	FieldsMasked    []string
+	FieldsDenied    []string
+}
+
 type FilmRepository interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]FilmRecord, error)
 	UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (FilmRecord, error)
 	Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmRecord, error)
 }
 
+type SecureFilmRepository interface {
+	ListByTenant(ctx context.Context, tenantID string) ([]FilmReadView, error)
+	UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (FilmReadView, error)
+	Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmReadView, error)
+}
+
 type FilmService struct {
-	repo     FilmRepository
+	repo     SecureFilmRepository
 	enforcer PolicyEnforcer // Only DCS dependency (handles all crypto)
 	audit    AuditWriter
 	perf     PerfWriter
@@ -59,7 +73,7 @@ type FilmService struct {
 }
 
 func NewFilmService(
-	repo FilmRepository,
+	repo SecureFilmRepository,
 	policyEnforcer PolicyEnforcer,
 	audit AuditWriter,
 	perfWriter PerfWriter,
@@ -81,6 +95,7 @@ func (s *FilmService) Create(
 	input FilmCreateInput,
 ) (FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmCreate)
 
 	// Phase 1: Authorization + Encryption (enforcer handles both)
 	encrypted, err := s.enforcer.EnforceFilmCreate(ctx, principal, reqCtx, FilmCreatePlain{
@@ -107,22 +122,10 @@ func (s *FilmService) Create(
 		return FilmOutput{}, pctx, err
 	}
 
-	// Phase 2: Persist (data already encrypted by enforcer)
-	stop := perf.Span(ctx, "db_ms")
+	// Phase 2: Persist + secure read-shaped response
 	created, err := s.repo.Create(ctx, principal.TenantID, encrypted.Title, encrypted.TimeElapsedCT)
-	stop()
 	if err != nil {
 		return FilmOutput{}, pctx, fmt.Errorf("create film: %w", err)
-	}
-
-	// Phase 4: Apply READ policy to response (read-shaped response pattern)
-	result, err := s.enforcer.EnforceFilmRead(ctx, principal, reqCtx, FilmReadInput{
-		FilmID:        created.ID,
-		Title:         created.Title,
-		TimeElapsedCT: created.TimeElapsedCT,
-	})
-	if err != nil {
-		return FilmOutput{}, pctx, err
 	}
 
 	// Phase 5: Audit logging (graceful degradation if audit service is nil)
@@ -130,10 +133,10 @@ func (s *FilmService) Create(
 		details := map[string]interface{}{
 			"title":            input.Title,
 			"new_time_elapsed": input.TimeElapsed,
-			"film_id":          created.ID,
+			"film_id":          created.Output.ID,
 		}
-		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.ID, "allow", "", details,
-			result.FieldsDecrypted, result.FieldsMasked, result.FieldsDenied)
+		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.Output.ID, "allow", "", details,
+			created.FieldsDecrypted, created.FieldsMasked, created.FieldsDenied)
 	}
 
 	// Phase 6: Performance logging
@@ -141,19 +144,14 @@ func (s *FilmService) Create(
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
 	}
 
-	return FilmOutput{
-		ID:          created.ID,
-		Title:       created.Title,
-		TimeElapsed: result.TimeElapsed,
-	}, pctx, nil
+	return created.Output, pctx, nil
 }
 
 func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx RequestContext) ([]FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmRead)
 
-	stop := perf.Span(ctx, "db_ms")
 	films, err := s.repo.ListByTenant(ctx, principal.TenantID)
-	stop()
 	if err != nil {
 		return nil, pctx, err
 	}
@@ -165,30 +163,17 @@ func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx Requ
 	maskedFields := make(map[string]bool)
 	deniedFields := make(map[string]bool)
 
-	for _, f := range films {
-		result, err := s.enforcer.EnforceFilmRead(ctx, principal, reqCtx, FilmReadInput{
-			FilmID:        f.ID,
-			Title:         f.Title,
-			TimeElapsedCT: f.TimeElapsedCT,
-		})
-		if err != nil {
-			return nil, pctx, err
-		}
-
-		out = append(out, FilmOutput{
-			ID:          f.ID,
-			Title:       f.Title,
-			TimeElapsed: result.TimeElapsed,
-		})
+	for _, film := range films {
+		out = append(out, film.Output)
 
 		// Aggregate field decisions (deduplication)
-		for _, field := range result.FieldsDecrypted {
+		for _, field := range film.FieldsDecrypted {
 			decryptedFields[field] = true
 		}
-		for _, field := range result.FieldsMasked {
+		for _, field := range film.FieldsMasked {
 			maskedFields[field] = true
 		}
-		for _, field := range result.FieldsDenied {
+		for _, field := range film.FieldsDenied {
 			deniedFields[field] = true
 		}
 	}
@@ -215,6 +200,7 @@ func (s *FilmService) UpdateTime(
 	timeElapsed int,
 ) (FilmOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmUpdateTime)
 
 	decision, err := s.enforcer.EvaluateFilmUpdateTime(ctx, principal, reqCtx, filmID)
 	if err != nil {
@@ -235,19 +221,14 @@ func (s *FilmService) UpdateTime(
 		return FilmOutput{}, pctx, fmt.Errorf("encrypt time_elapsed: %w", err)
 	}
 
-	stop = perf.Span(ctx, "db_ms")
 	updated, err := s.repo.UpdateTimeCiphertext(ctx, principal.TenantID, filmID, ciphertext)
-	stop()
 	if err != nil {
-		return FilmOutput{}, pctx, fmt.Errorf("%w: %v", ErrNotFound, err)
-	}
-
-	result, err := s.enforcer.EnforceFilmRead(ctx, principal, reqCtx, FilmReadInput{
-		FilmID:        updated.ID,
-		Title:         updated.Title,
-		TimeElapsedCT: updated.TimeElapsedCT,
-	})
-	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			return FilmOutput{}, pctx, err
+		}
+		if errors.Is(err, ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return FilmOutput{}, pctx, fmt.Errorf("%w: %v", ErrNotFound, err)
+		}
 		return FilmOutput{}, pctx, err
 	}
 
@@ -261,11 +242,7 @@ func (s *FilmService) UpdateTime(
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "film.update_time", "film")
 	}
 
-	return FilmOutput{
-		ID:          updated.ID,
-		Title:       updated.Title,
-		TimeElapsed: result.TimeElapsed,
-	}, pctx, nil
+	return updated.Output, pctx, nil
 }
 
 func (s *FilmService) writePerfLog(

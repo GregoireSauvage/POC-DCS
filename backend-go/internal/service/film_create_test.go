@@ -9,14 +9,15 @@ import (
 type fakeFilmRepoWithCreate struct {
 	*fakeFilmRepo
 	createResult FilmRecord
+	createView   FilmReadView
 	createError  error
 	createCalls  int
 }
 
-func (f *fakeFilmRepoWithCreate) Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmRecord, error) {
+func (f *fakeFilmRepoWithCreate) Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmReadView, error) {
 	f.createCalls++
 	if f.createError != nil {
-		return FilmRecord{}, f.createError
+		return FilmReadView{}, f.createError
 	}
 	// Simulate DB behavior: return record with generated ID
 	result := f.createResult
@@ -32,7 +33,17 @@ func (f *fakeFilmRepoWithCreate) Create(ctx context.Context, tenantID, title, ti
 	if result.ID == "" {
 		result.ID = "generated-uuid-123"
 	}
-	return result, nil
+	if f.createView.Output.ID != "" || f.createView.Output.Title != "" || f.createView.Output.TimeElapsed != nil || len(f.createView.FieldsDecrypted) > 0 || len(f.createView.FieldsMasked) > 0 || len(f.createView.FieldsDenied) > 0 {
+		view := f.createView
+		if view.Output.ID == "" {
+			view.Output.ID = result.ID
+		}
+		if view.Output.Title == "" {
+			view.Output.Title = result.Title
+		}
+		return view, nil
+	}
+	return f.fakeFilmRepo.buildView(ctx, result)
 }
 
 func TestFilmService_Create_AdminAllowed_Decrypted(t *testing.T) {
@@ -43,6 +54,14 @@ func TestFilmService_Create_AdminAllowed_Decrypted(t *testing.T) {
 			ID:            "film-123",
 			Title:         "Matrix",
 			TimeElapsedCT: "vault:v1:encrypted",
+		},
+		createView: FilmReadView{
+			Output: FilmOutput{
+				ID:          "film-123",
+				Title:       "Matrix",
+				TimeElapsed: 136,
+			},
+			FieldsDecrypted: []string{"time_elapsed"},
 		},
 	}
 	enforcer := &fakePolicyEnforcer{
@@ -124,6 +143,14 @@ func TestFilmService_Create_AgentAllowed_Decrypted(t *testing.T) {
 	repo := &fakeFilmRepoWithCreate{
 		fakeFilmRepo: &fakeFilmRepo{},
 		createResult: FilmRecord{ID: "film-456", Title: "Inception", TimeElapsedCT: "vault:v1:enc"},
+		createView: FilmReadView{
+			Output: FilmOutput{
+				ID:          "film-456",
+				Title:       "Inception",
+				TimeElapsed: 148,
+			},
+			FieldsDecrypted: []string{"time_elapsed"},
+		},
 	}
 	enforcer := &fakePolicyEnforcer{
 		enforceFilmCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {
@@ -237,6 +264,14 @@ func TestFilmService_Create_DefaultTimeElapsed(t *testing.T) {
 	repo := &fakeFilmRepoWithCreate{
 		fakeFilmRepo: &fakeFilmRepo{},
 		createResult: FilmRecord{ID: "film-789", Title: "Short", TimeElapsedCT: "vault:v1:zero"},
+		createView: FilmReadView{
+			Output: FilmOutput{
+				ID:          "film-789",
+				Title:       "Short",
+				TimeElapsed: 0,
+			},
+			FieldsDecrypted: []string{"time_elapsed"},
+		},
 	}
 	enforcer := &fakePolicyEnforcer{
 		enforceFilmCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {
@@ -350,6 +385,14 @@ func TestFilmService_Create_AuditError_DoesNotFail(t *testing.T) {
 	repo := &fakeFilmRepoWithCreate{
 		fakeFilmRepo: &fakeFilmRepo{},
 		createResult: FilmRecord{ID: "film-ok", Title: "OK", TimeElapsedCT: "vault:v1:ok"},
+		createView: FilmReadView{
+			Output: FilmOutput{
+				ID:          "film-ok",
+				Title:       "OK",
+				TimeElapsed: 100,
+			},
+			FieldsDecrypted: []string{"time_elapsed"},
+		},
 	}
 	enforcer := &fakePolicyEnforcer{
 		enforceFilmCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {
@@ -398,6 +441,14 @@ func TestFilmService_Create_NilAuditService(t *testing.T) {
 	repo := &fakeFilmRepoWithCreate{
 		fakeFilmRepo: &fakeFilmRepo{},
 		createResult: FilmRecord{ID: "film-no-audit", Title: "NoAudit", TimeElapsedCT: "vault:v1:ok"},
+		createView: FilmReadView{
+			Output: FilmOutput{
+				ID:          "film-no-audit",
+				Title:       "NoAudit",
+				TimeElapsed: 90,
+			},
+			FieldsDecrypted: []string{"time_elapsed"},
+		},
 	}
 	enforcer := &fakePolicyEnforcer{
 		enforceFilmCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {

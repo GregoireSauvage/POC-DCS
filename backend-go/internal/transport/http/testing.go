@@ -18,6 +18,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
+	securedrepo "github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres/secured"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 	serviceauth "github.com/neoweyss/poc-dcs/backend-go/internal/service/authorization"
 )
@@ -183,9 +184,12 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 
 	// No audit/perf services in tests by default (can be added via With methods)
-	filmService := service.NewFilmService(filmRepo, dcsEnforcer, nil, nil, rt)
-	hallService := service.NewHallService(hallRepo, dcsEnforcer, nil, nil, rt)
-	spectatorService := service.NewSpectatorService(spectatorRepo, hallRepo, dcsEnforcer, nil, nil, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, dcsEnforcer, logger.With(slog.String("component", "secured_film_repository")))
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, dcsEnforcer, logger.With(slog.String("component", "secured_hall_repository")))
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, dcsEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
+	filmService := service.NewFilmService(filmSecureRepo, dcsEnforcer, nil, nil, rt)
+	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, dcsEnforcer, nil, nil, rt)
+	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, dcsEnforcer, nil, nil, rt)
 
 	return &TestDependenciesBuilder{
 		deps: Dependencies{

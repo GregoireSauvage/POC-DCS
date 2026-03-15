@@ -11,11 +11,12 @@ import (
 )
 
 type hallService struct {
-	repo     HallRepository
-	enforcer PolicyEnforcer
-	audit    *AuditService
-	perf     PerfWriter
-	runtime  RuntimeSettings
+	repo       HallRepository
+	secureRepo SecureHallRepository
+	enforcer   PolicyEnforcer
+	audit      *AuditService
+	perf       PerfWriter
+	runtime    RuntimeSettings
 }
 
 // NewHallService creates a new hall service
@@ -29,6 +30,24 @@ func NewHallService(repo HallRepository, enforcer PolicyEnforcer, audit *AuditSe
 	}
 }
 
+func NewHallServiceWithSecureRepo(
+	repo HallRepository,
+	secureRepo SecureHallRepository,
+	enforcer PolicyEnforcer,
+	audit *AuditService,
+	perf PerfWriter,
+	runtime RuntimeSettings,
+) HallService {
+	return &hallService{
+		repo:       repo,
+		secureRepo: secureRepo,
+		enforcer:   enforcer,
+		audit:      audit,
+		perf:       perf,
+		runtime:    runtime,
+	}
+}
+
 // List returns all halls for the tenant with field-level enforcement
 func (s *hallService) List(
 	ctx context.Context,
@@ -36,6 +55,25 @@ func (s *hallService) List(
 	reqCtx RequestContext,
 ) ([]HallOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionHallRead)
+
+	if s.secureRepo != nil {
+		views, err := s.secureRepo.ListByTenant(ctx, principal.TenantID)
+		if err != nil {
+			return nil, pctx, fmt.Errorf("failed to list halls: %w", err)
+		}
+
+		outputs := make([]HallOutput, 0, len(views))
+		for _, view := range views {
+			outputs = append(outputs, view.Output)
+		}
+
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
+		}
+
+		return outputs, pctx, nil
+	}
 
 	// 1. Fetch halls from repository
 	stop := perf.Span(ctx, "db_ms")
@@ -87,6 +125,7 @@ func (s *hallService) Create(
 	input HallCreateInput,
 ) (HallOutput, *perf.Context, error) {
 	ctx, pctx := perf.NewContext(ctx)
+	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionHallCreate)
 
 	// 1. Authorization check
 	decision, err := s.enforcer.EvaluateHallCreate(ctx, principal, reqCtx, input.OwnerUserID)
@@ -108,6 +147,19 @@ func (s *hallService) Create(
 		Name:          input.Name,
 		OwnerUserID:   input.OwnerUserID,
 		CurrentFilmID: input.CurrentFilmID,
+	}
+
+	if s.secureRepo != nil {
+		view, err := s.secureRepo.Create(ctx, hall)
+		if err != nil {
+			return HallOutput{}, pctx, fmt.Errorf("failed to create hall: %w", err)
+		}
+
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+		}
+
+		return view.Output, pctx, nil
 	}
 
 	stop := perf.Span(ctx, "db_ms")

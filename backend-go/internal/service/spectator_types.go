@@ -6,6 +6,8 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 )
 
+const DefaultSpectatorPepperPath = "secret/dcs" // Python parity: config.VAULT_KV_PEPPER_PATH
+
 // SpectatorRepository defines operations for spectator persistence
 type SpectatorRepository interface {
 	Create(ctx context.Context, spectator *domain.Spectator) error
@@ -42,7 +44,7 @@ type SpectatorCreateEncrypted struct {
 
 // SpectatorOutput is the API response structure for a spectator
 type SpectatorOutput struct {
-	ID         interface{} `json:"id"`          // UUID or masked string ("550e…")
+	ID         interface{} `json:"id"` // UUID or masked string ("550e…")
 	HallID     string      `json:"hall_id"`
 	Name       interface{} `json:"name"`        // string (decrypted), string (masked), or nil
 	Age        interface{} `json:"age"`         // int (decrypted), string (masked), or nil
@@ -66,4 +68,16 @@ type SpectatorReadResult struct {
 	FieldsDecrypted []string
 	FieldsMasked    []string
 	FieldsDenied    []string
+}
+
+type SpectatorReadView struct {
+	Output          SpectatorOutput
+	FieldsDecrypted []string
+	FieldsMasked    []string
+	FieldsDenied    []string
+}
+
+type SecureSpectatorRepository interface {
+	Create(ctx context.Context, spectator *domain.Spectator) (SpectatorReadView, error)
+	SearchByExternalID(ctx context.Context, tenantID string, externalID string) ([]SpectatorReadView, error)
 }
