@@ -24,6 +24,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger) *Server {
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			unaryRequestIDInterceptor(),
+			unaryAccessContextInterceptor(cfg.Env),
 		),
 	)
 

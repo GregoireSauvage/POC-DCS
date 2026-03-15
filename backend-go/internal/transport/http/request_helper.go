@@ -16,7 +16,14 @@ type contextKey string
 const jwtClaimsKey contextKey = "jwt_claims"
 
 func principalFromRequest(r *nethttp.Request) service.Principal {
-	// Try to get JWT claims from context first
+	if access, ok := accessContextFromContext(r.Context()); ok {
+		return access.Principal
+	}
+
+	return buildPrincipal(r)
+}
+
+func buildPrincipal(r *nethttp.Request) service.Principal {
 	if claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims); ok {
 		return service.Principal{
 			TenantID: claims.TenantID,
@@ -27,7 +34,6 @@ func principalFromRequest(r *nethttp.Request) service.Principal {
 		}
 	}
 
-	// Fallback to X-headers (for dev/testing without JWT)
 	return service.Principal{
 		TenantID: readHeaderOrDefault(r, "X-Tenant-ID", "t1"),
 		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
@@ -38,6 +44,14 @@ func principalFromRequest(r *nethttp.Request) service.Principal {
 }
 
 func requestContextFromRequest(r *nethttp.Request, env string) service.RequestContext {
+	if access, ok := accessContextFromContext(r.Context()); ok {
+		return access.Request
+	}
+
+	return buildRequestContext(r, env)
+}
+
+func buildRequestContext(r *nethttp.Request, env string) service.RequestContext {
 	return service.RequestContext{
 		RequestID:   readHeaderOrDefault(r, "X-Request-ID", "http-no-request-id"),
 		ClientIP:    readHeaderOrDefault(r, "X-Real-IP", r.RemoteAddr),

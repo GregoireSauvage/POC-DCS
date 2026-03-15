@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -53,7 +53,7 @@ func TestGetHalls_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 		b.WithHallService(hallService)
 	})
 
-	token, _ := server.jwtService.GenerateToken(types.Principal{
+	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
 	})
 
@@ -89,7 +89,7 @@ func TestGetHalls_AgentSeesINTERNAL(t *testing.T) {
 		b.WithHallService(hallService)
 	})
 
-	token, _ := server.jwtService.GenerateToken(types.Principal{
+	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},
 	})
 
@@ -172,7 +172,7 @@ func TestPostHalls_AgentAllowed(t *testing.T) {
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
 	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
 
-	token, _ := server.jwtService.GenerateToken(types.Principal{
+	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},
 	})
 
@@ -199,7 +199,7 @@ func TestPostHalls_DeveloperForbidden(t *testing.T) {
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
 	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
 
-	token, _ := server.jwtService.GenerateToken(types.Principal{
+	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
 	})
 

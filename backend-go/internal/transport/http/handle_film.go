@@ -22,10 +22,13 @@ func (s *Server) handleFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
 }
 
 func (s *Server) handleListFilms(w nethttp.ResponseWriter, r *nethttp.Request) {
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
-	films, pctx, err := s.filmFlow.List(r.Context(), principal, reqCtx)
+	films, pctx, err := s.filmFlow.List(r.Context(), access.Principal, access.Request)
 	if err != nil {
 		writeError(w, nethttp.StatusInternalServerError, err.Error())
 		return
@@ -56,9 +59,13 @@ func (s *Server) handleFilmSubroutes(w nethttp.ResponseWriter, r *nethttp.Reques
 		return
 	}
 
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
-	film, pctx, err := s.filmFlow.UpdateTime(r.Context(), principal, reqCtx, parts[0], timeElapsed)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
+
+	film, pctx, err := s.filmFlow.UpdateTime(r.Context(), access.Principal, access.Request, parts[0], timeElapsed)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
@@ -103,12 +110,14 @@ func (s *Server) handleCreateFilm(w nethttp.ResponseWriter, r *nethttp.Request) 
 		return
 	}
 
-	// 4. Extract principal and request context
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
 	// 5. Call service
-	film, pctx, err := s.filmFlow.Create(r.Context(), principal, reqCtx, service.FilmCreateInput{
+	film, pctx, err := s.filmFlow.Create(r.Context(), access.Principal, access.Request, service.FilmCreateInput{
 		Title:       strings.TrimSpace(req.Title),
 		TimeElapsed: req.TimeElapsed,
 	})

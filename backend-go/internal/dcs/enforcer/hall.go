@@ -5,7 +5,6 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -16,24 +15,21 @@ func (e *DcsEnforcer) EvaluateHallCreate(
 	reqCtx service.RequestContext,
 	ownerUserID string,
 ) (service.AuthorizationDecision, error) {
-	// Build policy input
-	pipInput := pip.Input{
+	policyInput, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "hall.create",
+		Action:       string(service.ActionHallCreate),
 		ResourceType: "hall",
-		ResourceID:   "",
 		OwnerID:      ownerUserID,
 		Request:      toDCSRequestContext(reqCtx),
-		CryptoMeta:   nil, // Halls have no encrypted fields
-	}
-
-	policyInput, err := e.pip.Build(ctx, pipInput)
+	})
 	if err != nil {
 		return service.AuthorizationDecision{}, err
 	}
 
-	// Evaluate policy
-	decision, _ := e.pdp.Evaluate(policyInput)
+	decision, err := e.authorizePolicyInput(ctx, policyInput)
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
 	return service.AuthorizationDecision{
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
@@ -49,24 +45,22 @@ func (e *DcsEnforcer) EvaluateHallRead(
 	hallID string,
 	ownerUserID string,
 ) (service.AuthorizationDecision, error) {
-	// Build policy input
-	pipInput := pip.Input{
+	policyInput, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "hall.read",
+		Action:       string(service.ActionHallRead),
 		ResourceType: "hall",
 		ResourceID:   hallID,
 		OwnerID:      ownerUserID,
 		Request:      toDCSRequestContext(reqCtx),
-		CryptoMeta:   nil, // Halls have no encrypted fields
-	}
-
-	policyInput, err := e.pip.Build(ctx, pipInput)
+	})
 	if err != nil {
 		return service.AuthorizationDecision{}, err
 	}
 
-	// Evaluate policy
-	decision, _ := e.pdp.Evaluate(policyInput)
+	decision, err := e.authorizePolicyInput(ctx, policyInput)
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
 	return service.AuthorizationDecision{
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
@@ -81,42 +75,35 @@ func (e *DcsEnforcer) EnforceHallRead(
 	reqCtx service.RequestContext,
 	hall service.HallReadInput,
 ) (service.HallReadResult, error) {
-	// Build policy input
-	pipInput := pip.Input{
+	policyInput, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "hall.read",
+		Action:       string(service.ActionHallRead),
 		ResourceType: "hall",
 		ResourceID:   hall.HallID,
 		OwnerID:      hall.OwnerUserID,
 		Request:      toDCSRequestContext(reqCtx),
-		CryptoMeta:   nil, // Halls have no encrypted fields
-	}
-
-	policyInput, err := e.pip.Build(ctx, pipInput)
+	})
 	if err != nil {
 		return service.HallReadResult{}, err
 	}
 
-	// Evaluate policy
-	decision, _ := e.pdp.Evaluate(policyInput)
+	decision, err := e.authorizePolicyInput(ctx, policyInput)
+	if err != nil {
+		return service.HallReadResult{}, err
+	}
 
 	result := service.HallReadResult{}
-	fa := decision.FieldActions
-
-	// Name: PUBLIC - visible for all roles, never denied
 	name := hall.Name
 	result.Name = &name
 
-	// OwnerUserID: INTERNAL - masked for developer only
-	if fa["owner_user_id"] == types.FieldActionMaskAfterDecrypt {
+	if decision.FieldActions["owner_user_id"] == service.FieldActionMaskAfterDecrypt {
 		result.OwnerUserID = pep.MaskUUID(hall.OwnerUserID)
 		result.FieldsMasked = append(result.FieldsMasked, "owner_user_id")
 	} else {
 		result.OwnerUserID = hall.OwnerUserID
 	}
 
-	// CurrentFilmID: INTERNAL - masked for developer only
-	if fa["current_film_id"] == types.FieldActionMaskAfterDecrypt {
+	if decision.FieldActions["current_film_id"] == service.FieldActionMaskAfterDecrypt {
 		result.CurrentFilmID = pep.MaskUUID(hall.CurrentFilmID)
 		result.FieldsMasked = append(result.FieldsMasked, "current_film_id")
 	} else {
@@ -125,4 +112,3 @@ func (e *DcsEnforcer) EnforceHallRead(
 
 	return result, nil
 }
-

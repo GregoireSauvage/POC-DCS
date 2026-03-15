@@ -8,7 +8,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository"
 )
 
@@ -35,14 +34,14 @@ func NewAuthService(userRepo repository.UserRepository, jwtSvc *auth.JWTService)
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
-	TenantID string `json:"tenant_id"` // Optional, defaults to "t1" for PoC
+	TenantID string `json:"tenant_id"`
 }
 
 // LoginResponse represents the login response with JWT token
 type LoginResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"` // seconds
+	ExpiresIn   int    `json:"expires_in"`
 	UserID      string `json:"user_id"`
 	TenantID    string `json:"tenant_id"`
 	Username    string `json:"username"`
@@ -51,12 +50,10 @@ type LoginResponse struct {
 
 // Login authenticates a user and returns a JWT token
 func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
-	// Default tenant for PoC
 	if req.TenantID == "" {
 		req.TenantID = "t1"
 	}
 
-	// Get user from database
 	user, err := s.userRepo.GetByUsername(ctx, req.TenantID, req.Username)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -65,21 +62,19 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
-	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
-	// Generate JWT token with Python-compatible scopes
-	principal := types.Principal{
+	subject := auth.JWTSubject{
 		UserID:   user.ID,
 		TenantID: user.TenantID,
 		Username: user.Username,
 		Role:     user.Role,
-		Scopes:   roleToScopesArray(user.Role), // Return []string for Python parity
+		Scopes:   roleToScopesArray(user.Role),
 	}
 
-	token, err := s.jwtSvc.GenerateToken(principal)
+	token, err := s.jwtSvc.GenerateToken(subject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -87,7 +82,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 	return &LoginResponse{
 		AccessToken: token,
 		TokenType:   "Bearer",
-		ExpiresIn:   240 * 60, // 240 minutes = 4 hours (from config)
+		ExpiresIn:   240 * 60,
 		UserID:      user.ID,
 		TenantID:    user.TenantID,
 		Username:    user.Username,
@@ -96,7 +91,6 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 }
 
 // roleToScopesArray converts a role to scopes array (Python parity)
-// Python uses: ["*"] for admin, ["cinema"] for agent/developer
 func roleToScopesArray(role string) []string {
 	switch role {
 	case "admin":

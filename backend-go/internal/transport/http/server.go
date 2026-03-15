@@ -76,21 +76,21 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/auth/login", s.handleLogin)
 
 	// Admin routes (strict JWT + admin role required)
-	s.mux.Handle("/admin/settings", s.adminMiddleware(nethttp.HandlerFunc(s.handleAdminSettings)))
-	s.mux.Handle("/audit", s.adminMiddleware(nethttp.HandlerFunc(s.handleAudit)))
-	s.mux.Handle("/audit/", s.adminMiddleware(nethttp.HandlerFunc(s.handleAudit))) // Trailing slash variant
-	s.mux.Handle("/perf", s.adminMiddleware(nethttp.HandlerFunc(s.handlePerf)))
-	s.mux.Handle("/perf/", s.adminMiddleware(nethttp.HandlerFunc(s.handlePerf))) // Trailing slash variant
-	s.mux.Handle("/perf/summary", s.adminMiddleware(nethttp.HandlerFunc(s.handlePerfSummary)))
+	s.mux.Handle("/admin/settings", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleAdminSettings))))
+	s.mux.Handle("/audit", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleAudit))))
+	s.mux.Handle("/audit/", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleAudit)))) // Trailing slash variant
+	s.mux.Handle("/perf", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handlePerf))))
+	s.mux.Handle("/perf/", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handlePerf)))) // Trailing slash variant
+	s.mux.Handle("/perf/summary", s.adminMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handlePerfSummary))))
 
 	// Protected routes (optional JWT - fallback to X-headers for dev)
-	s.mux.Handle("/films", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilms)))
-	s.mux.Handle("/films/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes)))
-	s.mux.Handle("/halls", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleHalls)))
-	s.mux.Handle("/halls/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleHalls))) // Trailing slash variant
-	s.mux.Handle("/spectators", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleSpectators)))
-	s.mux.Handle("/spectators/", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleSpectators))) // Trailing slash variant
-	s.mux.Handle("/spectators/search", s.optionalJWTMiddleware(nethttp.HandlerFunc(s.handleSearchSpectators)))
+	s.mux.Handle("/films", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleFilms))))
+	s.mux.Handle("/films/", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleFilmSubroutes))))
+	s.mux.Handle("/halls", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleHalls))))
+	s.mux.Handle("/halls/", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleHalls)))) // Trailing slash variant
+	s.mux.Handle("/spectators", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleSpectators))))
+	s.mux.Handle("/spectators/", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleSpectators)))) // Trailing slash variant
+	s.mux.Handle("/spectators/search", s.optionalJWTMiddleware(s.accessContextMiddleware(nethttp.HandlerFunc(s.handleSearchSpectators))))
 }
 
 func (s *Server) Start(ctx context.Context) error {

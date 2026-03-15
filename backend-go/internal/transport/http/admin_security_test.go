@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
 func newTestServerWithAuth(t *testing.T) (*Server, *auth.JWTService) {
@@ -19,7 +18,7 @@ func newTestServerWithAuth(t *testing.T) (*Server, *auth.JWTService) {
 
 func generateToken(t *testing.T, jwtSvc *auth.JWTService, role string) string {
 	t.Helper()
-	principal := types.Principal{
+	principal := auth.JWTSubject{
 		UserID:   "test-user-id",
 		TenantID: "test-tenant",
 		Username: "testuser",

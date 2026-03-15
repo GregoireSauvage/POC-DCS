@@ -25,10 +25,13 @@ func (s *Server) handleAudit(w nethttp.ResponseWriter, r *nethttp.Request) {
 		return
 	}
 
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
-	logs, err := s.auditService.List(r.Context(), principal, reqCtx, limit)
+	logs, err := s.auditService.List(r.Context(), access.Principal, access.Request, limit)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
 			writeError(w, nethttp.StatusForbidden, "admin role required")

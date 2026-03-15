@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -19,7 +19,7 @@ func TestIntegration_FilmLifecycle(t *testing.T) {
 	server := newTestServer(t)
 
 	// Admin creates a film
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "t1", Username: "admin", Role: "admin",
 	})
 
@@ -77,7 +77,7 @@ func TestIntegration_FilmLifecycle(t *testing.T) {
 	}
 
 	// 3. READ as Developer - should see masked time_elapsed
-	devToken, _ := server.jwtService.GenerateToken(types.Principal{
+	devToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
 	})
 
@@ -136,12 +136,12 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 	server := newTestServer(t)
 
 	// User from tenant t1
-	t1Token, _ := server.jwtService.GenerateToken(types.Principal{
+	t1Token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u1", TenantID: "t1", Username: "user1", Role: "admin",
 	})
 
 	// User from tenant t2
-	t2Token, _ := server.jwtService.GenerateToken(types.Principal{
+	t2Token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u2", TenantID: "t2", Username: "user2", Role: "admin",
 	})
 
@@ -215,7 +215,7 @@ func TestIntegration_DCSRoleMatrix(t *testing.T) {
 
 	for _, tc := range roles {
 		t.Run(tc.name, func(t *testing.T) {
-			token, _ := server.jwtService.GenerateToken(types.Principal{
+			token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 				UserID: "u-" + tc.role, TenantID: "t1", Username: tc.role, Role: tc.role,
 			})
 
@@ -265,7 +265,7 @@ func TestIntegration_HallSpectatorWorkflow(t *testing.T) {
 		b.WithSpectatorService(spectatorService)
 	})
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "t1", Username: "admin", Role: "admin",
 	})
 
@@ -347,7 +347,7 @@ func TestIntegration_HallSpectatorWorkflow(t *testing.T) {
 func TestIntegration_ErrorHandling(t *testing.T) {
 	server := newTestServer(t)
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "t1", Username: "admin", Role: "admin",
 	})
 
@@ -425,7 +425,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 func TestIntegration_ConcurrentRequests(t *testing.T) {
 	server := newTestServer(t)
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "t1", Username: "admin", Role: "admin",
 	})
 
@@ -471,11 +471,11 @@ func (e *testError) Error() string {
 func TestIntegration_DCSSwitchRuntime(t *testing.T) {
 	server := newTestServer(t)
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "t1", Username: "admin", Role: "admin",
 	})
 
-	devToken, _ := server.jwtService.GenerateToken(types.Principal{
+	devToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
 	})
 

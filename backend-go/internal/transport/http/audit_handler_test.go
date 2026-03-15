@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
@@ -207,7 +207,7 @@ func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enf
 func generateNonAdminToken(t *testing.T, s *Server, role string) string {
 	t.Helper()
 	token, err := s.jwtService.GenerateToken(
-		types.Principal{
+		auth.JWTSubject{
 			UserID:   "test-user-id",
 			TenantID: "test-tenant",
 			Username: "testuser",
@@ -621,7 +621,7 @@ func TestAudit_TenantIsolation(t *testing.T) {
 
 	// Generate token for tenant-1
 	tenant1Token, err := server.jwtService.GenerateToken(
-		types.Principal{
+		auth.JWTSubject{
 			UserID:   "admin-1",
 			TenantID: "tenant-1",
 			Username: "admin1",
@@ -719,7 +719,7 @@ func TestAudit_DCS_CalledWithCorrectParams(t *testing.T) {
 
 	// Generate token for specific tenant
 	token, err := server.jwtService.GenerateToken(
-		types.Principal{
+		auth.JWTSubject{
 			UserID:   "user-123",
 			TenantID: "tenant-test",
 			Username: "testadmin",

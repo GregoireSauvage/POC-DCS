@@ -43,10 +43,13 @@ func (s *Server) handleSpectators(w nethttp.ResponseWriter, r *nethttp.Request) 
 		return
 	}
 
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
-	spectator, _, err := s.spectatorService.Create(r.Context(), principal, reqCtx, service.SpectatorCreateInput{
+	spectator, _, err := s.spectatorService.Create(r.Context(), access.Principal, access.Request, service.SpectatorCreateInput{
 		HallID:     req.HallID,
 		Name:       req.Name,
 		Age:        req.Age,
@@ -64,8 +67,8 @@ func (s *Server) handleSpectators(w nethttp.ResponseWriter, r *nethttp.Request) 
 		s.logger.Error(
 			"spectator create error",
 			"error", err.Error(),
-			"request_id", reqCtx.RequestID,
-			"tenant_id", principal.TenantID,
+			"request_id", access.Request.RequestID,
+			"tenant_id", access.Principal.TenantID,
 		)
 		nethttp.Error(w, "internal error", nethttp.StatusInternalServerError)
 		return
@@ -89,10 +92,13 @@ func (s *Server) handleSearchSpectators(w nethttp.ResponseWriter, r *nethttp.Req
 		return
 	}
 
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
-	spectators, _, err := s.spectatorService.Search(r.Context(), principal, reqCtx, externalID)
+	spectators, _, err := s.spectatorService.Search(r.Context(), access.Principal, access.Request, externalID)
 	if errors.Is(err, service.ErrForbidden) {
 		nethttp.Error(w, "Forbidden", nethttp.StatusForbidden)
 		return

@@ -29,6 +29,18 @@ func unaryRequestIDInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+func unaryAccessContextInterceptor(env string) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		ctx = withAccessContext(ctx, buildAccessContext(ctx, info.FullMethod, env))
+		return handler(ctx, req)
+	}
+}
+
 func first(values []string) string {
 	if len(values) == 0 {
 		return ""

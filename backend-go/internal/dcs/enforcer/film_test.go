@@ -8,12 +8,12 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	serviceauth "github.com/neoweyss/poc-dcs/backend-go/internal/service/authorization"
 )
 
 type fixedClassificationStore struct {
@@ -74,10 +74,13 @@ func newDcsEnforcerForTest(mode string, cacheLevel int, store pip.Classification
 		DeviceTrust:    0.8,
 		ClientIPHeader: "x-real-ip",
 	})
-	engine := pdp.NewEngine(rt, cm, &dcsconfig.Defaults().PDP)
+	cfg := dcsconfig.Defaults()
+	policy := dcsconfig.NewPDPPolicy(&cfg.PDP)
+	pdpAuthorizer := serviceauth.NewPDP(policy)
+	baseAuthorizer := serviceauth.NewAuthorizer(rt, pdpAuthorizer)
 	filmApplier := pep.NewFilmApplier(rt, crypto)
 	spectatorApplier := pep.NewSpectatorApplier(crypto)
-	return New(provider, engine, filmApplier, spectatorApplier, crypto, "secret/dcs")
+	return New(provider, baseAuthorizer, filmApplier, spectatorApplier, crypto, "secret/dcs")
 }
 
 func defaultFilmStore() pip.ClassificationStore {

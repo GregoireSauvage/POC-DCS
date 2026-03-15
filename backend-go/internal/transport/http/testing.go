@@ -12,7 +12,6 @@ import (
 	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
@@ -20,12 +19,100 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	serviceauth "github.com/neoweyss/poc-dcs/backend-go/internal/service/authorization"
 )
 
 // TestDependenciesBuilder provides a fluent API for building test dependencies
 // Allows easy customization of individual dependencies for focused testing
 type TestDependenciesBuilder struct {
 	deps Dependencies
+}
+
+type httpPDPDecisionCacheAdapter struct {
+	cache *cache.TTL[string, types.Decision]
+}
+
+func newHTTPAuthorizer(rt *runtime.Settings, cm *cache.Manager, cfg *dcsconfig.DCSConfig) service.Authorizer {
+	policy := dcsconfig.NewPDPPolicy(&cfg.PDP)
+	pdp := serviceauth.NewPDP(policy)
+	base := serviceauth.NewAuthorizer(rt, pdp)
+	return serviceauth.NewCachedAuthorizer(rt, &httpPDPDecisionCacheAdapter{cache: cm.PDP}, base)
+}
+
+func (a *httpPDPDecisionCacheAdapter) Get(key string) (service.Decision, bool) {
+	if a == nil || a.cache == nil {
+		return service.Decision{}, false
+	}
+	decision, ok := a.cache.Get(key)
+	if !ok {
+		return service.Decision{}, false
+	}
+	return service.Decision{
+		Allow:        decision.Allow,
+		FieldActions: httpToServiceFieldActions(decision.FieldActions),
+		Reason:       decision.Reason,
+		Hash:         decision.Hash,
+	}, true
+}
+
+func (a *httpPDPDecisionCacheAdapter) Set(key string, value service.Decision) {
+	if a == nil || a.cache == nil {
+		return
+	}
+	a.cache.Set(key, types.Decision{
+		Allow:        value.Allow,
+		FieldActions: httpToLegacyFieldActions(value.FieldActions),
+		Reason:       value.Reason,
+		Hash:         value.Hash,
+	}, 0)
+}
+
+func httpToServiceFieldActions(actions map[string]types.FieldAction) map[string]service.FieldAction {
+	if actions == nil {
+		return nil
+	}
+	converted := make(map[string]service.FieldAction, len(actions))
+	for field, action := range actions {
+		converted[field] = httpToServiceFieldAction(action)
+	}
+	return converted
+}
+
+func httpToServiceFieldAction(action types.FieldAction) service.FieldAction {
+	switch action {
+	case types.FieldActionAllow:
+		return service.FieldActionAllow
+	case types.FieldActionDecrypt:
+		return service.FieldActionDecrypt
+	case types.FieldActionMaskAfterDecrypt:
+		return service.FieldActionMaskAfterDecrypt
+	default:
+		return service.FieldActionDeny
+	}
+}
+
+func httpToLegacyFieldActions(actions map[string]service.FieldAction) map[string]types.FieldAction {
+	if actions == nil {
+		return nil
+	}
+	converted := make(map[string]types.FieldAction, len(actions))
+	for field, action := range actions {
+		converted[field] = httpToLegacyFieldAction(action)
+	}
+	return converted
+}
+
+func httpToLegacyFieldAction(action service.FieldAction) types.FieldAction {
+	switch action {
+	case service.FieldActionAllow:
+		return types.FieldActionAllow
+	case service.FieldActionDecrypt:
+		return types.FieldActionDecrypt
+	case service.FieldActionMaskAfterDecrypt:
+		return types.FieldActionMaskAfterDecrypt
+	default:
+		return types.FieldActionDeny
+	}
 }
 
 // NewTestDependenciesBuilder creates a builder with sensible defaults for testing
@@ -74,10 +161,10 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		DeviceTrust:    1.0,
 		ClientIPHeader: "X-Forwarded-For",
 	})
-	pdpEngine := pdp.NewEngine(rt, cm, &dcsConfig.PDP)
+	authorizer := newHTTPAuthorizer(rt, cm, dcsConfig)
 	filmApplier := pep.NewFilmApplier(rt, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	dcsEnforcer := enforcer.New(pipProvider, pdpEngine, filmApplier, spectatorApplier, kmsClient, "")
+	dcsEnforcer := enforcer.New(pipProvider, authorizer, filmApplier, spectatorApplier, kmsClient, "")
 
 	// Setup repositories (in-memory with seed data)
 	seedCT, _ := kmsClient.Encrypt(context.Background(), "120")
@@ -227,7 +314,7 @@ func testConfig() *config.Config {
 func adminAuthHeader(t *testing.T, s *Server) string {
 	t.Helper()
 	token, err := s.jwtService.GenerateToken(
-		types.Principal{
+		auth.JWTSubject{
 			UserID:   "admin-id",
 			TenantID: "t1",
 			Username: "admin",

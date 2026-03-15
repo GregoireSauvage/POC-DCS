@@ -10,16 +10,16 @@ import (
 	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	serviceauth "github.com/neoweyss/poc-dcs/backend-go/internal/service/authorization"
 	httptransport "github.com/neoweyss/poc-dcs/backend-go/internal/transport/http"
 )
 
@@ -33,16 +33,9 @@ func BuildHTTPDependencies(
 ) httptransport.Dependencies {
 	logger.Info("building HTTP server dependencies")
 
-	// 1. Setup infrastructure (DCS config, runtime, cache, KMS, classification store)
 	infra := setupInfrastructure(cfg, logger, db)
-
-	// 2. Setup DCS pipeline (PIP → PDP → PEP → Enforcer)
 	dcs := setupDCS(cfg, logger, infra)
-
-	// 3. Setup repositories (Postgres or Memory)
 	repos := setupRepositories(logger, db, infra.KMS)
-
-	// 4. Setup services (Film, Hall, Spectator, Auth, Audit, Perf, JWT)
 	services := setupServices(cfg, logger, repos, dcs, infra.Runtime)
 
 	logger.Info("HTTP server dependencies built successfully")
@@ -75,7 +68,7 @@ type Infrastructure struct {
 // DCSComponents holds all components of the DCS pipeline
 type DCSComponents struct {
 	Provider         *pip.Provider
-	Engine           *pdp.Engine
+	Authorizer       service.Authorizer
 	FilmApplier      *pep.FilmApplier
 	SpectatorApplier *pep.SpectatorApplier
 	Enforcer         *enforcer.DcsEnforcer
@@ -103,9 +96,88 @@ type Services struct {
 	JWT       *auth.JWTService
 }
 
+type pdpDecisionCacheAdapter struct {
+	cache *cache.TTL[string, legacytypes.Decision]
+}
+
+func (a *pdpDecisionCacheAdapter) Get(key string) (service.Decision, bool) {
+	if a == nil || a.cache == nil {
+		return service.Decision{}, false
+	}
+	decision, ok := a.cache.Get(key)
+	if !ok {
+		return service.Decision{}, false
+	}
+	return service.Decision{
+		Allow:        decision.Allow,
+		FieldActions: bootstrapToServiceFieldActions(decision.FieldActions),
+		Reason:       decision.Reason,
+		Hash:         decision.Hash,
+	}, true
+}
+
+func (a *pdpDecisionCacheAdapter) Set(key string, value service.Decision) {
+	if a == nil || a.cache == nil {
+		return
+	}
+	a.cache.Set(key, legacytypes.Decision{
+		Allow:        value.Allow,
+		FieldActions: bootstrapToLegacyFieldActions(value.FieldActions),
+		Reason:       value.Reason,
+		Hash:         value.Hash,
+	}, 0)
+}
+
+func bootstrapToServiceFieldActions(actions map[string]legacytypes.FieldAction) map[string]service.FieldAction {
+	if actions == nil {
+		return nil
+	}
+	converted := make(map[string]service.FieldAction, len(actions))
+	for field, action := range actions {
+		converted[field] = bootstrapToServiceFieldAction(action)
+	}
+	return converted
+}
+
+func bootstrapToServiceFieldAction(action legacytypes.FieldAction) service.FieldAction {
+	switch action {
+	case legacytypes.FieldActionAllow:
+		return service.FieldActionAllow
+	case legacytypes.FieldActionDecrypt:
+		return service.FieldActionDecrypt
+	case legacytypes.FieldActionMaskAfterDecrypt:
+		return service.FieldActionMaskAfterDecrypt
+	default:
+		return service.FieldActionDeny
+	}
+}
+
+func bootstrapToLegacyFieldActions(actions map[string]service.FieldAction) map[string]legacytypes.FieldAction {
+	if actions == nil {
+		return nil
+	}
+	converted := make(map[string]legacytypes.FieldAction, len(actions))
+	for field, action := range actions {
+		converted[field] = bootstrapToLegacyFieldAction(action)
+	}
+	return converted
+}
+
+func bootstrapToLegacyFieldAction(action service.FieldAction) legacytypes.FieldAction {
+	switch action {
+	case service.FieldActionAllow:
+		return legacytypes.FieldActionAllow
+	case service.FieldActionDecrypt:
+		return legacytypes.FieldActionDecrypt
+	case service.FieldActionMaskAfterDecrypt:
+		return legacytypes.FieldActionMaskAfterDecrypt
+	default:
+		return legacytypes.FieldActionDeny
+	}
+}
+
 // setupInfrastructure constructs all infrastructure components
 func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) Infrastructure {
-	// 1. Load DCS configuration
 	var dcsConfig *dcsconfig.DCSConfig
 	if cfg.DCSConfigPath != "" {
 		loaded, err := dcsconfig.Load(cfg.DCSConfigPath)
@@ -121,14 +193,12 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		dcsConfig = dcsconfig.Defaults()
 	}
 
-	// 2. Setup runtime settings
 	rt := runtime.New(cfg.DCSMode, cfg.CacheLevel)
 	logger.Info("runtime settings initialized",
 		slog.Bool("dcs_enabled", rt.DcsEnabled()),
 		slog.Int("cache_level", rt.CacheLevel()),
 	)
 
-	// 3. Setup cache manager
 	cm := cache.NewManager(rt, cache.Options{
 		MaxEntries:        cfg.CacheMaxEntries,
 		ClassificationTTL: cfg.CacheTTLClassif,
@@ -138,7 +208,6 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 	})
 	logger.Info("cache manager initialized")
 
-	// 4. Setup KMS (Vault or Local)
 	var kmsClient enforcer.CryptoService
 	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
 		logger.Info("using Vault Transit KMS")
@@ -160,22 +229,21 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		kmsClient = kms.NewLocalClient()
 	}
 
-	// 5. Setup classification store
 	staticStore := &pip.StaticClassificationStore{
-		ByResource: map[string]map[string]types.Classification{
+		ByResource: map[string]map[string]legacytypes.Classification{
 			"film": {
-				"title":        types.ClassificationPublic,
-				"time_elapsed": types.ClassificationSensitive,
+				"title":        legacytypes.ClassificationPublic,
+				"time_elapsed": legacytypes.ClassificationSensitive,
 			},
 			"hall": {
-				"name":            types.ClassificationPublic,
-				"owner_user_id":   types.ClassificationInternal,
-				"current_film_id": types.ClassificationInternal,
+				"name":            legacytypes.ClassificationPublic,
+				"owner_user_id":   legacytypes.ClassificationInternal,
+				"current_film_id": legacytypes.ClassificationInternal,
 			},
 			"spectator": {
-				"name":        types.ClassificationPII,
-				"age":         types.ClassificationSensitive,
-				"external_id": types.ClassificationPII,
+				"name":        legacytypes.ClassificationPII,
+				"age":         legacytypes.ClassificationSensitive,
+				"external_id": legacytypes.ClassificationPII,
 			},
 		},
 	}
@@ -210,19 +278,22 @@ func setupDCS(cfg *config.Config, logger *slog.Logger, infra Infrastructure) DCS
 	})
 	logger.Info("PIP provider initialized")
 
-	engine := pdp.NewEngine(infra.Runtime, infra.Cache, &infra.DCSConfig.PDP)
-	logger.Info("PDP engine initialized")
+	policy := dcsconfig.NewPDPPolicy(&infra.DCSConfig.PDP)
+	pdpAuthorizer := serviceauth.NewPDP(policy)
+	baseAuthorizer := serviceauth.NewAuthorizer(infra.Runtime, pdpAuthorizer)
+	cachedAuthorizer := serviceauth.NewCachedAuthorizer(infra.Runtime, &pdpDecisionCacheAdapter{cache: infra.Cache.PDP}, baseAuthorizer)
+	logger.Info("authorization stack initialized")
 
 	filmApplier := pep.NewFilmApplier(infra.Runtime, infra.KMS)
 	spectatorApplier := pep.NewSpectatorApplier(infra.KMS)
 	logger.Info("PEP appliers initialized", slog.String("appliers", "Film, Spectator"))
 
-	dcsEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, infra.KMS, cfg.VaultKVPepperPath)
+	dcsEnforcer := enforcer.New(provider, cachedAuthorizer, filmApplier, spectatorApplier, infra.KMS, cfg.VaultKVPepperPath)
 	logger.Info("DCS enforcer initialized")
 
 	return DCSComponents{
 		Provider:         provider,
-		Engine:           engine,
+		Authorizer:       cachedAuthorizer,
 		FilmApplier:      filmApplier,
 		SpectatorApplier: spectatorApplier,
 		Enforcer:         dcsEnforcer,
@@ -249,12 +320,8 @@ func setupRepositories(logger *slog.Logger, db *postgres.Pool, kmsClient enforce
 		if seedCT == "" {
 			seedCT = "120"
 		}
-		repos.Film = memory.NewFilmRepository([]service.FilmRecord{
-			{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT},
-		})
-		repos.Hall = memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		})
+		repos.Film = memory.NewFilmRepository([]service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT}})
+		repos.Hall = memory.NewHallRepository([]domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}})
 		repos.Spectator = memory.NewSpectatorRepository()
 		repos.User = nil
 		repos.Audit = nil

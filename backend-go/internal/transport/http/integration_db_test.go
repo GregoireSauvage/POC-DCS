@@ -16,7 +16,6 @@ import (
 	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
@@ -78,10 +77,10 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		Env: cfg.Env, Channel: dcsCfg.PIP.Channel, Purpose: dcsCfg.PIP.Purpose,
 		DeviceTrust: dcsCfg.PIP.DeviceTrust, ClientIPHeader: dcsCfg.PIP.ClientIPHeader,
 	})
-	engine := pdp.NewEngine(rt, cm, &dcsCfg.PDP)
+	authorizer := newHTTPAuthorizer(rt, cm, dcsCfg)
 	filmApplier := pep.NewFilmApplier(rt, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	policyEnforcer := enforcer.New(provider, engine, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
+	policyEnforcer := enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
 
 	// Repositories with DB
 	filmRepo := postgres.NewFilmRepository(db)
@@ -150,7 +149,7 @@ func TestIntegration_WithRealDatabase(t *testing.T) {
 	}
 
 	// Run a full CRUD test with database persistence
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-admin", TenantID: "test-tenant", Username: "admin", Role: "admin",
 	})
 
@@ -227,7 +226,7 @@ func TestIntegration_AuditLogging(t *testing.T) {
 	logger := testLogger()
 	server := newServerWithDB(cfg, logger, db)
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "audit-test-user", TenantID: "audit-tenant", Username: "admin", Role: "admin",
 	})
 
@@ -294,7 +293,7 @@ func TestIntegration_PerformanceLogging(t *testing.T) {
 	logger := testLogger()
 	server := newServerWithDB(cfg, logger, db)
 
-	adminToken, _ := server.jwtService.GenerateToken(types.Principal{
+	adminToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "perf-test-user", TenantID: "perf-tenant", Username: "admin", Role: "admin",
 	})
 
@@ -353,7 +352,7 @@ func TestIntegration_ClassificationPersistence(t *testing.T) {
 	// Classifications should be loaded from database
 	// This is verified by making requests and checking DCS enforcement
 
-	devToken, _ := server.jwtService.GenerateToken(types.Principal{
+	devToken, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
 	})
 

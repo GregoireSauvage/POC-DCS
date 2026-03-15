@@ -6,10 +6,9 @@ import (
 	"log/slog"
 	"strconv"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pdp"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
@@ -24,17 +23,17 @@ type CryptoService interface {
 
 type DcsEnforcer struct {
 	pip              *pip.Provider
-	pdp              *pdp.Engine
+	authorizer       service.Authorizer
 	filmApplier      *pep.FilmApplier
 	spectatorApplier *pep.SpectatorApplier
-	kms              CryptoService // Full crypto service (encrypt + decrypt + pepper)
-	pepperPath       string        // Vault KV path for HMAC pepper
+	kms              CryptoService
+	pepperPath       string
 }
 
-func New(pipProvider *pip.Provider, pdpEngine *pdp.Engine, filmApplier *pep.FilmApplier, spectatorApplier *pep.SpectatorApplier, kms CryptoService, pepperPath string) *DcsEnforcer {
+func New(pipProvider *pip.Provider, authorizer service.Authorizer, filmApplier *pep.FilmApplier, spectatorApplier *pep.SpectatorApplier, kms CryptoService, pepperPath string) *DcsEnforcer {
 	return &DcsEnforcer{
 		pip:              pipProvider,
-		pdp:              pdpEngine,
+		authorizer:       authorizer,
 		filmApplier:      filmApplier,
 		spectatorApplier: spectatorApplier,
 		kms:              kms,
@@ -62,7 +61,7 @@ func (e *DcsEnforcer) EvaluateFilmCreate(
 	principal service.Principal,
 	reqCtx service.RequestContext,
 ) (service.AuthorizationDecision, error) {
-	decision, err := e.evaluate(ctx, principal, reqCtx, "film.create", "")
+	decision, err := e.evaluate(ctx, principal, reqCtx, string(service.ActionFilmCreate), "")
 	if err != nil {
 		return service.AuthorizationDecision{}, err
 	}
@@ -79,7 +78,7 @@ func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 	reqCtx service.RequestContext,
 	filmID string,
 ) (service.AuthorizationDecision, error) {
-	decision, err := e.evaluate(ctx, principal, reqCtx, "film.update_time", filmID)
+	decision, err := e.evaluate(ctx, principal, reqCtx, string(service.ActionFilmUpdateTime), filmID)
 	if err != nil {
 		return service.AuthorizationDecision{}, err
 	}
@@ -97,7 +96,7 @@ func (e *DcsEnforcer) EvaluateAuditRead(
 ) (service.AuthorizationDecision, error) {
 	pi, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "audit.read",
+		Action:       string(service.ActionAuditRead),
 		ResourceType: "audit",
 		ResourceID:   "audit",
 		Request:      toDCSRequestContext(reqCtx),
@@ -106,19 +105,21 @@ func (e *DcsEnforcer) EvaluateAuditRead(
 		return service.AuthorizationDecision{}, err
 	}
 
-	stop := perf.Span(ctx, "pdp_ms")
-	decision, _ := e.pdp.Evaluate(pi)
-	stop()
+	decision, err := e.authorizePolicyInput(ctx, pi)
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
 
-	slog.Debug("perf.read decision",
+	slog.Debug("audit.read decision",
 		slog.String("role", principal.Role),
 		slog.String("tenant_id", principal.TenantID),
 		slog.Bool("allow", decision.Allow),
 		slog.String("reason", decision.Reason),
 	)
 	return service.AuthorizationDecision{
-		Allow:  decision.Allow,
-		Reason: decision.Reason,
+		Allow:        decision.Allow,
+		Reason:       decision.Reason,
+		DecisionHash: decision.Hash,
 	}, nil
 }
 
@@ -129,7 +130,7 @@ func (e *DcsEnforcer) EvaluatePerfRead(
 ) (service.AuthorizationDecision, error) {
 	pi, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "perf.read",
+		Action:       string(service.ActionPerfRead),
 		ResourceType: "perf",
 		ResourceID:   "perf",
 		Request:      toDCSRequestContext(reqCtx),
@@ -138,13 +139,14 @@ func (e *DcsEnforcer) EvaluatePerfRead(
 		return service.AuthorizationDecision{}, err
 	}
 
-	stop := perf.Span(ctx, "pdp_ms")
-	decision, _ := e.pdp.Evaluate(pi)
-	stop()
-
+	decision, err := e.authorizePolicyInput(ctx, pi)
+	if err != nil {
+		return service.AuthorizationDecision{}, err
+	}
 	return service.AuthorizationDecision{
-		Allow:  decision.Allow,
-		Reason: decision.Reason,
+		Allow:        decision.Allow,
+		Reason:       decision.Reason,
+		DecisionHash: decision.Hash,
 	}, nil
 }
 
@@ -154,11 +156,11 @@ func (e *DcsEnforcer) EnforceFilmRead(
 	reqCtx service.RequestContext,
 	film service.FilmReadInput,
 ) (service.FilmReadResult, error) {
-	decision, err := e.evaluate(ctx, principal, reqCtx, "film.read", film.FilmID)
+	decision, err := e.evaluate(ctx, principal, reqCtx, string(service.ActionFilmRead), film.FilmID)
 	if err != nil {
 		return service.FilmReadResult{}, err
 	}
-	result, err := e.filmApplier.Apply(ctx, decision, pep.FilmRow{
+	result, err := e.filmApplier.Apply(ctx, toDCSDecision(decision), pep.FilmRow{
 		Title:         film.Title,
 		TimeElapsedCT: film.TimeElapsedCT,
 	})
@@ -182,11 +184,9 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 	reqCtx service.RequestContext,
 	input service.FilmCreatePlain,
 ) (service.FilmCreateEncrypted, error) {
-
-	// Phase 1: PIP - Build policy input
 	pi, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
-		Action:       "film.create",
+		Action:       string(service.ActionFilmCreate),
 		ResourceType: "film",
 		Request:      toDCSRequestContext(reqCtx),
 	})
@@ -194,17 +194,15 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 		return service.FilmCreateEncrypted{}, fmt.Errorf("pip build failed: %w", err)
 	}
 
-	// Phase 2: PDP - Evaluate authorization
-	stop := perf.Span(ctx, "pdp_ms")
-	decision, _ := e.pdp.Evaluate(pi)
-	stop()
-
+	decision, err := e.authorizePolicyInput(ctx, pi)
+	if err != nil {
+		return service.FilmCreateEncrypted{}, err
+	}
 	if !decision.Allow {
 		return service.FilmCreateEncrypted{}, service.ErrForbidden
 	}
 
-	// Phase 3: PEP - Encrypt sensitive fields
-	stop = perf.Span(ctx, "kms_ms")
+	stop := perf.Span(ctx, "kms_ms")
 	timeElapsedCT, err := e.kms.Encrypt(ctx, strconv.Itoa(input.TimeElapsed))
 	stop()
 	if err != nil {
@@ -223,7 +221,7 @@ func (e *DcsEnforcer) evaluate(
 	reqCtx service.RequestContext,
 	action string,
 	resourceID string,
-) (types.Decision, error) {
+) (service.Decision, error) {
 	pi, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
 		Action:       action,
@@ -235,17 +233,23 @@ func (e *DcsEnforcer) evaluate(
 		},
 	})
 	if err != nil {
-		return types.Decision{}, err
+		return service.Decision{}, err
 	}
+	return e.authorizePolicyInput(ctx, pi)
+}
 
+func (e *DcsEnforcer) authorizePolicyInput(ctx context.Context, policyInput legacytypes.PolicyInput) (service.Decision, error) {
 	stop := perf.Span(ctx, "pdp_ms")
-	decision, _ := e.pdp.Evaluate(pi)
+	decision, err := e.authorizer.Authorize(ctx, toServicePolicyInput(policyInput))
 	stop()
+	if err != nil {
+		return service.Decision{}, err
+	}
 	return decision, nil
 }
 
-func toDCSPrincipal(p service.Principal) types.Principal {
-	return types.Principal{
+func toDCSPrincipal(p service.Principal) legacytypes.Principal {
+	return legacytypes.Principal{
 		TenantID: p.TenantID,
 		UserID:   p.UserID,
 		Username: p.Username,
@@ -254,8 +258,8 @@ func toDCSPrincipal(p service.Principal) types.Principal {
 	}
 }
 
-func toDCSRequestContext(c service.RequestContext) types.RequestContext {
-	return types.RequestContext{
+func toDCSRequestContext(c service.RequestContext) legacytypes.RequestContext {
+	return legacytypes.RequestContext{
 		RequestID:   c.RequestID,
 		ClientIP:    c.ClientIP,
 		Channel:     c.Channel,

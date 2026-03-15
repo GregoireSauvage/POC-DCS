@@ -3,14 +3,12 @@ package auth
 import (
 	"testing"
 	"time"
-
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
 func TestJWTService_GenerateToken(t *testing.T) {
 	svc := NewJWTService("test-secret", "test-issuer", "test-audience", 60)
 
-	principal := types.Principal{
+	principal := JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -37,7 +35,7 @@ func TestJWTService_GenerateToken(t *testing.T) {
 func TestJWTService_ValidateToken(t *testing.T) {
 	svc := NewJWTService("test-secret", "test-issuer", "test-audience", 60)
 
-	principal := types.Principal{
+	principal := JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -100,7 +98,7 @@ func TestJWTService_ValidateToken_WrongSecret(t *testing.T) {
 	svc1 := NewJWTService("secret-1", "test-issuer", "test-audience", 60)
 	svc2 := NewJWTService("secret-2", "test-issuer", "test-audience", 60)
 
-	principal := types.Principal{
+	principal := JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -124,7 +122,7 @@ func TestJWTService_ValidateToken_WrongSecret(t *testing.T) {
 func TestJWTService_ValidateToken_WrongAudience(t *testing.T) {
 	svc := NewJWTService("test-secret", "test-issuer", "audience-1", 60)
 
-	principal := types.Principal{
+	principal := JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -146,7 +144,7 @@ func TestJWTService_ValidateToken_WrongAudience(t *testing.T) {
 	}
 }
 
-func TestJWTService_ClaimsToPrincipal(t *testing.T) {
+func TestJWTService_ClaimsToSubject(t *testing.T) {
 	svc := NewJWTService("test-secret", "test-issuer", "test-audience", 60)
 
 	claims := &JWTClaims{
@@ -157,7 +155,7 @@ func TestJWTService_ClaimsToPrincipal(t *testing.T) {
 		Scopes:   []string{"*"}, // Admin scopes as array for Python parity
 	}
 
-	principal := svc.ClaimsToPrincipal(claims)
+	principal := svc.ClaimsToSubject(claims)
 
 	if principal.UserID != "user-123" {
 		t.Errorf("Expected UserID user-123, got %s", principal.UserID)
@@ -180,7 +178,7 @@ func TestJWTService_TokenExpiration(t *testing.T) {
 	// Create service with very short TTL (1 second)
 	svc := NewJWTService("test-secret", "test-issuer", "test-audience", 0) // 0 minutes TTL
 
-	principal := types.Principal{
+	principal := JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -221,7 +219,7 @@ func TestJWTService_ScopesArrayParity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			principal := types.Principal{
+			principal := JWTSubject{
 				UserID:   "user-123",
 				TenantID: "t1",
 				Username: "testuser",
@@ -258,9 +256,9 @@ func TestJWTService_ScopesArrayParity(t *testing.T) {
 			}
 
 			// Convert to Principal and verify
-			convertedPrincipal := svc.ClaimsToPrincipal(claims)
+			convertedPrincipal := svc.ClaimsToSubject(claims)
 			if len(convertedPrincipal.Scopes) != len(tt.expectedScopes) {
-				t.Errorf("ClaimsToPrincipal: Expected %d scopes, got %d", len(tt.expectedScopes), len(convertedPrincipal.Scopes))
+				t.Errorf("ClaimsToSubject: Expected %d scopes, got %d", len(tt.expectedScopes), len(convertedPrincipal.Scopes))
 			}
 		})
 	}

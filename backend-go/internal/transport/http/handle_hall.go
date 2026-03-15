@@ -29,12 +29,14 @@ func (s *Server) handleHalls(w nethttp.ResponseWriter, r *nethttp.Request) {
 
 // handleListHalls handles GET /halls
 func (s *Server) handleListHalls(w nethttp.ResponseWriter, r *nethttp.Request) {
-	// 1. Extract principal and request context
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
 	// 2. Call service
-	halls, pctx, err := s.hallService.List(r.Context(), principal, reqCtx)
+	halls, pctx, err := s.hallService.List(r.Context(), access.Principal, access.Request)
 	if err != nil {
 		s.logger.Error("failed to list halls", "error", err)
 		writeError(w, nethttp.StatusInternalServerError, "internal server error")
@@ -77,12 +79,14 @@ func (s *Server) handleCreateHall(w nethttp.ResponseWriter, r *nethttp.Request) 
 		return
 	}
 
-	// 4. Extract principal and request context
-	principal := principalFromRequest(r)
-	reqCtx := requestContextFromRequest(r, s.cfg.Env)
+	access, ok := accessContextFromRequest(r)
+	if !ok {
+		writeError(w, nethttp.StatusInternalServerError, "missing access context")
+		return
+	}
 
 	// 5. Call service
-	hall, pctx, err := s.hallService.Create(r.Context(), principal, reqCtx, service.HallCreateInput{
+	hall, pctx, err := s.hallService.Create(r.Context(), access.Principal, access.Request, service.HallCreateInput{
 		Name:          strings.TrimSpace(req.Name),
 		OwnerUserID:   strings.TrimSpace(req.OwnerUserID),
 		CurrentFilmID: strings.TrimSpace(req.CurrentFilmID),

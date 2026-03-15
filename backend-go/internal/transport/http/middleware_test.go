@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -15,7 +14,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 	jwtSvc := auth.NewJWTService("test-secret", "test-issuer", "test-audience", 60)
 
 	// Generate a valid token
-	principal := types.Principal{
+	principal := auth.JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",
@@ -153,7 +152,7 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 	// Create JWT service with 0 TTL (immediately expired)
 	jwtSvc := auth.NewJWTService("test-secret", "test-issuer", "test-audience", 0)
 
-	principal := types.Principal{
+	principal := auth.JWTSubject{
 		UserID:   "user-123",
 		TenantID: "t1",
 		Username: "alice",

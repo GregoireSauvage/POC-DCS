@@ -1,3 +1,5 @@
+// Package types contains legacy DCS contracts.
+// Deprecated: canonical DCS application contracts now live in internal/service.
 package types
 
 type Classification string
@@ -60,5 +62,5 @@ type Decision struct {
 	Allow        bool
 	FieldActions map[string]FieldAction
 	Reason       string
-	Hash         string // Deterministic hash of PDP decision for audit correlation
+	Hash         string
 }

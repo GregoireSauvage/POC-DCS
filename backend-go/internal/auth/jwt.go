@@ -2,12 +2,20 @@ package auth
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
+
+// JWTSubject represents the subject data encoded in JWT tokens.
+type JWTSubject struct {
+	UserID   string
+	TenantID string
+	Username string
+	Role     string
+	Scopes   []string
+}
 
 // JWTClaims represents the JWT token claims
 type JWTClaims struct {
@@ -15,7 +23,7 @@ type JWTClaims struct {
 	TenantID string   `json:"tenant_id"`
 	Username string   `json:"username"`
 	Role     string   `json:"role"`
-	Scopes   []string `json:"scopes,omitempty"` // Changed to []string for Python parity
+	Scopes   []string `json:"scopes,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -37,19 +45,25 @@ func NewJWTService(secret, issuer, audience string, ttlMinutes int) *JWTService 
 	}
 }
 
-// GenerateToken creates a new JWT token for a user
-func (j *JWTService) GenerateToken(principal types.Principal) (string, error) {
+// GenerateToken creates a new JWT token for a user.
+// It accepts JWTSubject and legacy principal-like structs for compatibility.
+func (j *JWTService) GenerateToken(subject any) (string, error) {
+	normalized, err := normalizeSubject(subject)
+	if err != nil {
+		return "", err
+	}
+
 	now := time.Now()
 	claims := JWTClaims{
-		UserID:   principal.UserID,
-		TenantID: principal.TenantID,
-		Username: principal.Username,
-		Role:     principal.Role,
-		Scopes:   principal.Scopes, // Use scopes array directly from principal
+		UserID:   normalized.UserID,
+		TenantID: normalized.TenantID,
+		Username: normalized.Username,
+		Role:     normalized.Role,
+		Scopes:   normalized.Scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,
 			Audience:  jwt.ClaimStrings{j.audience},
-			Subject:   principal.UserID,
+			Subject:   normalized.UserID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(j.ttl)),
 		},
@@ -67,13 +81,11 @@ func (j *JWTService) GenerateToken(principal types.Principal) (string, error) {
 // ValidateToken validates a JWT token and returns the claims
 func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return j.secret, nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
@@ -83,7 +95,6 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	// Verify audience - check if our audience is in the token's audience list
 	validAudience := false
 	for _, aud := range claims.Audience {
 		if aud == j.audience {
@@ -94,8 +105,6 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	if !validAudience {
 		return nil, fmt.Errorf("invalid audience")
 	}
-
-	// Verify issuer
 	if claims.Issuer != j.issuer {
 		return nil, fmt.Errorf("invalid issuer")
 	}
@@ -103,13 +112,96 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	return claims, nil
 }
 
-// ClaimsToPrincipal converts JWT claims to a Principal
-func (j *JWTService) ClaimsToPrincipal(claims *JWTClaims) types.Principal {
-	return types.Principal{
+// ClaimsToSubject converts JWT claims to a JWTSubject.
+func (j *JWTService) ClaimsToSubject(claims *JWTClaims) JWTSubject {
+	return JWTSubject{
 		UserID:   claims.UserID,
 		TenantID: claims.TenantID,
 		Username: claims.Username,
 		Role:     claims.Role,
-		Scopes:   claims.Scopes, // Scopes are already []string
+		Scopes:   claims.Scopes,
 	}
+}
+
+func normalizeSubject(subject any) (JWTSubject, error) {
+	switch s := subject.(type) {
+	case JWTSubject:
+		return s, nil
+	case *JWTSubject:
+		if s == nil {
+			return JWTSubject{}, fmt.Errorf("nil JWT subject")
+		}
+		return *s, nil
+	}
+
+	v := reflect.ValueOf(subject)
+	if !v.IsValid() {
+		return JWTSubject{}, fmt.Errorf("invalid JWT subject")
+	}
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return JWTSubject{}, fmt.Errorf("nil JWT subject")
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return JWTSubject{}, fmt.Errorf("unsupported JWT subject type %T", subject)
+	}
+
+	userID, err := extractStringField(v, "UserID")
+	if err != nil {
+		return JWTSubject{}, err
+	}
+	tenantID, err := extractStringField(v, "TenantID")
+	if err != nil {
+		return JWTSubject{}, err
+	}
+	username, err := extractStringField(v, "Username")
+	if err != nil {
+		return JWTSubject{}, err
+	}
+	role, err := extractStringField(v, "Role")
+	if err != nil {
+		return JWTSubject{}, err
+	}
+	scopes, err := extractStringSliceField(v, "Scopes")
+	if err != nil {
+		return JWTSubject{}, err
+	}
+
+	return JWTSubject{
+		UserID:   userID,
+		TenantID: tenantID,
+		Username: username,
+		Role:     role,
+		Scopes:   scopes,
+	}, nil
+}
+
+func extractStringField(v reflect.Value, name string) (string, error) {
+	field := v.FieldByName(name)
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return "", fmt.Errorf("JWT subject missing string field %q", name)
+	}
+	return field.String(), nil
+}
+
+func extractStringSliceField(v reflect.Value, name string) ([]string, error) {
+	field := v.FieldByName(name)
+	if !field.IsValid() {
+		return nil, fmt.Errorf("JWT subject missing slice field %q", name)
+	}
+	if field.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("JWT subject field %q is not a slice", name)
+	}
+
+	out := make([]string, 0, field.Len())
+	for i := 0; i < field.Len(); i++ {
+		item := field.Index(i)
+		if item.Kind() != reflect.String {
+			return nil, fmt.Errorf("JWT subject field %q contains non-string values", name)
+		}
+		out = append(out, item.String())
+	}
+	return out, nil
 }

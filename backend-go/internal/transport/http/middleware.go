@@ -9,6 +9,13 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 )
 
+func (s *Server) accessContextMiddleware(next nethttp.Handler) nethttp.Handler {
+	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		ctx := withAccessContext(r.Context(), buildAccessContext(r, s.cfg.Env))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // jwtMiddleware validates JWT token and rejects requests without valid token
 func (s *Server) jwtMiddleware(next nethttp.Handler) nethttp.Handler {
 	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
