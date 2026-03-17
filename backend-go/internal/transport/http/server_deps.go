@@ -18,9 +18,6 @@ type Dependencies struct {
 	Runtime *config.DCSRuntime
 	Cache   *cache.Manager
 
-	// DCS enforcement
-	Enforcer service.PolicyEnforcer
-
 	// Domain services
 	FilmService      *service.FilmService
 	HallService      service.HallService

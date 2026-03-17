@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
@@ -57,6 +56,16 @@ type FilmReadView struct {
 	PolicyVersion   string
 }
 
+type FilmReadCandidate struct {
+	Record   FilmRecord
+	Resource Resource
+}
+
+type FilmCreateInput struct {
+	Title       string
+	TimeElapsed int
+}
+
 type FilmRepository interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]FilmRecord, error)
 	UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (FilmRecord, error)
@@ -64,32 +73,36 @@ type FilmRepository interface {
 }
 
 type SecureFilmRepository interface {
-	ListByTenant(ctx context.Context, tenantID string) ([]FilmReadView, error)
-	UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (FilmReadView, error)
-	Create(ctx context.Context, tenantID, title, timeElapsedCT string) (FilmReadView, error)
+	ListCandidates(ctx context.Context, tenantID string) ([]FilmReadCandidate, error)
+	Create(ctx context.Context, tenantID string, input FilmCreateInput, decision Decision) (FilmReadCandidate, error)
+	UpdateTime(ctx context.Context, tenantID, filmID string, timeElapsed int, decision Decision) (FilmReadCandidate, error)
+	ApplyReadDecision(ctx context.Context, candidate FilmReadCandidate, decision Decision) (FilmReadView, error)
 }
 
 type FilmService struct {
-	repo     SecureFilmRepository
-	enforcer PolicyEnforcer // Only DCS dependency (handles all crypto)
-	audit    AuditWriter
-	perf     PerfWriter
-	runtime  RuntimeSettings
+	repo                 SecureFilmRepository
+	authorizer           Authorizer
+	classificationReader ClassificationMetadataReader
+	audit                AuditWriter
+	perf                 PerfWriter
+	runtime              RuntimeSettings
 }
 
 func NewFilmService(
 	repo SecureFilmRepository,
-	policyEnforcer PolicyEnforcer,
+	authorizer Authorizer,
+	classificationReader ClassificationMetadataReader,
 	audit AuditWriter,
 	perfWriter PerfWriter,
 	runtime RuntimeSettings,
 ) *FilmService {
 	return &FilmService{
-		repo:     repo,
-		enforcer: policyEnforcer,
-		audit:    audit,
-		perf:     perfWriter,
-		runtime:  runtime,
+		repo:                 repo,
+		authorizer:           authorizer,
+		classificationReader: classificationReader,
+		audit:                audit,
+		perf:                 perfWriter,
+		runtime:              runtime,
 	}
 }
 
@@ -102,37 +115,26 @@ func (s *FilmService) Create(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmCreate)
 
-	// Phase 1: Authorization + Encryption (enforcer handles both)
-	encrypted, err := s.enforcer.EnforceFilmCreate(ctx, principal, reqCtx, FilmCreatePlain{
-		Title:       input.Title,
-		TimeElapsed: input.TimeElapsed,
-	})
+	writeResource, err := BuildFilmWriteResource(ctx, s.classificationReader, principal.TenantID, "")
 	if err != nil {
-		// Enforcer returns ErrForbidden if denied
+		return FilmOutput{}, pctx, fmt.Errorf("build film.create resource: %w", err)
+	}
+	writeDecision, err := s.authorize(ctx, ActionFilmCreate, writeResource)
+	if err != nil {
+		return FilmOutput{}, pctx, fmt.Errorf("authorize film.create: %w", err)
+	}
+	if !writeDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", writeDecision.Hash, writeDecision.PolicyID, writeDecision.PolicyVersion,
+				map[string]interface{}{"reason": writeDecision.Reason}, nil, nil, nil)
+		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
 		}
-		// Audit log for deny (Python parity)
-		if errors.Is(err, ErrForbidden) && s.audit != nil {
-			// Extract decision hash and details from ForbiddenError if available
-			var forbiddenErr *ForbiddenError
-			decisionHash := ""
-			details := map[string]interface{}(nil)
-			policyID := ""
-			policyVersion := ""
-			if errors.As(err, &forbiddenErr) {
-				decisionHash = forbiddenErr.DecisionHash
-				details = forbiddenErr.Details
-				policyID = forbiddenErr.PolicyID
-				policyVersion = forbiddenErr.PolicyVersion
-			}
-			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
-		}
-		return FilmOutput{}, pctx, err
+		return FilmOutput{}, pctx, ErrForbidden
 	}
 
-	// Phase 2: Persist + secure read-shaped response
-	created, err := s.repo.Create(ctx, principal.TenantID, encrypted.Title, encrypted.TimeElapsedCT)
+	candidate, err := s.repo.Create(ctx, principal.TenantID, input, writeDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -157,7 +159,46 @@ func (s *FilmService) Create(
 		return FilmOutput{}, pctx, fmt.Errorf("create film: %w", err)
 	}
 
-	// Phase 5: Audit logging (graceful degradation if audit service is nil)
+	readDecision, err := s.authorize(ctx, ActionFilmRead, candidate.Resource)
+	if err != nil {
+		return FilmOutput{}, pctx, fmt.Errorf("authorize film.read after create: %w", err)
+	}
+	if !readDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", candidate.Record.ID, "deny", readDecision.Hash, readDecision.PolicyID, readDecision.PolicyVersion,
+				map[string]interface{}{"reason": readDecision.Reason}, nil, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
+		}
+		return FilmOutput{}, pctx, ErrForbidden
+	}
+
+	created, err := s.repo.ApplyReadDecision(ctx, candidate, readDecision)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", candidate.Record.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
+			}
+			return FilmOutput{}, pctx, ErrForbidden
+		}
+		return FilmOutput{}, pctx, fmt.Errorf("shape created film: %w", err)
+	}
+
 	if s.audit != nil {
 		details := map[string]interface{}{
 			"title":            input.Title,
@@ -167,8 +208,6 @@ func (s *FilmService) Create(
 		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.Output.ID, "allow", created.DecisionHash, created.PolicyID, created.PolicyVersion, details,
 			created.FieldsDecrypted, created.FieldsMasked, created.FieldsDenied)
 	}
-
-	// Phase 6: Performance logging
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
 	}
@@ -180,7 +219,7 @@ func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx Requ
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmRead)
 
-	films, err := s.repo.ListByTenant(ctx, principal.TenantID)
+	candidates, err := s.repo.ListCandidates(ctx, principal.TenantID)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -205,43 +244,78 @@ func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx Requ
 		return nil, pctx, err
 	}
 
-	out := make([]FilmOutput, 0, len(films))
-
-	// Collect field decisions for audit logging
+	views := make([]FilmReadView, 0, len(candidates))
+	out := make([]FilmOutput, 0, len(candidates))
 	decryptedFields := make(map[string]bool)
 	maskedFields := make(map[string]bool)
 	deniedFields := make(map[string]bool)
 
-	for _, film := range films {
-		out = append(out, film.Output)
+	for _, candidate := range candidates {
+		decision, err := s.authorize(ctx, ActionFilmRead, candidate.Resource)
+		if err != nil {
+			return nil, pctx, fmt.Errorf("authorize film.read: %w", err)
+		}
+		if !decision.Allow {
+			if s.audit != nil {
+				s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", candidate.Record.ID, "deny", decision.Hash, decision.PolicyID, decision.PolicyVersion,
+					map[string]interface{}{"reason": decision.Reason}, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "film.read", "film")
+			}
+			return nil, pctx, ErrForbidden
+		}
 
-		// Aggregate field decisions (deduplication)
-		for _, field := range film.FieldsDecrypted {
+		view, err := s.repo.ApplyReadDecision(ctx, candidate, decision)
+		if err != nil {
+			if errors.Is(err, ErrForbidden) {
+				if s.audit != nil {
+					var forbiddenErr *ForbiddenError
+					decisionHash := ""
+					policyID := ""
+					policyVersion := ""
+					details := map[string]interface{}(nil)
+					if errors.As(err, &forbiddenErr) {
+						decisionHash = forbiddenErr.DecisionHash
+						policyID = forbiddenErr.PolicyID
+						policyVersion = forbiddenErr.PolicyVersion
+						details = forbiddenErr.Details
+					}
+					s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", candidate.Record.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+				}
+				if s.perf != nil {
+					s.writePerfLog(ctx, pctx, principal, reqCtx, "film.read", "film")
+				}
+				return nil, pctx, ErrForbidden
+			}
+			return nil, pctx, fmt.Errorf("apply film.read decision: %w", err)
+		}
+
+		views = append(views, view)
+		out = append(out, view.Output)
+		for _, field := range view.FieldsDecrypted {
 			decryptedFields[field] = true
 		}
-		for _, field := range film.FieldsMasked {
+		for _, field := range view.FieldsMasked {
 			maskedFields[field] = true
 		}
-		for _, field := range film.FieldsDenied {
+		for _, field := range view.FieldsDenied {
 			deniedFields[field] = true
 		}
 	}
 
-	// Write audit log (graceful degradation if audit service is nil)
 	if s.audit != nil {
 		policyID := ""
 		policyVersion := ""
 		decisionHash := ""
-		if len(films) > 0 {
-			policyID = films[0].PolicyID
-			policyVersion = films[0].PolicyVersion
-			decisionHash = films[0].DecisionHash
+		if len(views) > 0 {
+			policyID = views[0].PolicyID
+			policyVersion = views[0].PolicyVersion
+			decisionHash = views[0].DecisionHash
 		}
 		s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", "", "allow", decisionHash, policyID, policyVersion, nil,
 			mapKeys(decryptedFields), mapKeys(maskedFields), mapKeys(deniedFields))
 	}
-
-	// Write perf log
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "film.read", "film")
 	}
@@ -259,26 +333,26 @@ func (s *FilmService) UpdateTime(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionFilmUpdateTime)
 
-	decision, err := s.enforcer.EvaluateFilmUpdateTime(ctx, principal, reqCtx, filmID)
+	writeResource, err := BuildFilmWriteResource(ctx, s.classificationReader, principal.TenantID, filmID)
 	if err != nil {
-		return FilmOutput{}, pctx, err
+		return FilmOutput{}, pctx, fmt.Errorf("build film.update_time resource: %w", err)
 	}
-	if !decision.Allow {
-		// Write audit log for denied update (before returning error)
+	writeDecision, err := s.authorize(ctx, ActionFilmUpdateTime, writeResource)
+	if err != nil {
+		return FilmOutput{}, pctx, fmt.Errorf("authorize film.update_time: %w", err)
+	}
+	if !writeDecision.Allow {
 		if s.audit != nil {
-			s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
+			s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", writeDecision.Hash, writeDecision.PolicyID, writeDecision.PolicyVersion,
+				map[string]interface{}{"reason": writeDecision.Reason}, nil, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "film.update_time", "film")
 		}
 		return FilmOutput{}, pctx, ErrForbidden
 	}
 
-	stop := perf.Span(ctx, "kms_ms")
-	ciphertext, err := s.enforcer.Encrypt(ctx, strconv.Itoa(timeElapsed))
-	stop()
-	if err != nil {
-		return FilmOutput{}, pctx, fmt.Errorf("encrypt time_elapsed: %w", err)
-	}
-
-	updated, err := s.repo.UpdateTimeCiphertext(ctx, principal.TenantID, filmID, ciphertext)
+	candidate, err := s.repo.UpdateTime(ctx, principal.TenantID, filmID, timeElapsed, writeDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -303,17 +377,70 @@ func (s *FilmService) UpdateTime(
 		return FilmOutput{}, pctx, err
 	}
 
-	// Write audit log for successful update
-	if s.audit != nil {
-		s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "allow", decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
+	readDecision, err := s.authorize(ctx, ActionFilmRead, candidate.Resource)
+	if err != nil {
+		return FilmOutput{}, pctx, fmt.Errorf("authorize film.read after update: %w", err)
+	}
+	if !readDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", readDecision.Hash, readDecision.PolicyID, readDecision.PolicyVersion,
+				map[string]interface{}{"reason": readDecision.Reason}, nil, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "film.update_time", "film")
+		}
+		return FilmOutput{}, pctx, ErrForbidden
 	}
 
-	// Write perf log
+	updated, err := s.repo.ApplyReadDecision(ctx, candidate, readDecision)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			return FilmOutput{}, pctx, ErrForbidden
+		}
+		return FilmOutput{}, pctx, fmt.Errorf("shape updated film: %w", err)
+	}
+
+	if s.audit != nil {
+		details := map[string]interface{}{"new_time_elapsed": timeElapsed}
+		s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "allow", updated.DecisionHash, updated.PolicyID, updated.PolicyVersion, details,
+			updated.FieldsDecrypted, updated.FieldsMasked, updated.FieldsDenied)
+	}
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "film.update_time", "film")
 	}
 
 	return updated.Output, pctx, nil
+}
+
+func (s *FilmService) authorize(ctx context.Context, action Action, resource Resource) (Decision, error) {
+	if s.authorizer == nil {
+		return Decision{}, fmt.Errorf("film authorizer not configured")
+	}
+
+	access, ok := AccessContextFromContext(ctx)
+	if !ok {
+		return Decision{}, &ForbiddenError{Reason: "missing_access_context"}
+	}
+	access.Action = action
+
+	return s.authorizer.Authorize(ctx, PolicyInput{
+		Access:   access,
+		Resource: resource,
+	})
 }
 
 func (s *FilmService) writePerfLog(
@@ -324,6 +451,10 @@ func (s *FilmService) writePerfLog(
 	action string,
 	resourceType string,
 ) {
+	if s.perf == nil || s.runtime == nil {
+		return
+	}
+
 	metrics := pctx.Metrics()
 
 	var pipMS, pdpMS, kmsMS, dbMS *float64
@@ -357,8 +488,6 @@ func (s *FilmService) writePerfLog(
 	})
 }
 
-// writeAuditLog writes an audit log entry for film operations.
-// Errors are logged but do not fail the request (graceful degradation).
 func (s *FilmService) writeAuditLog(
 	ctx context.Context,
 	principal Principal,
@@ -375,7 +504,9 @@ func (s *FilmService) writeAuditLog(
 	fieldsMasked []string,
 	fieldsDenied []string,
 ) {
-	// Graceful degradation: ignore errors to avoid failing user requests
+	if s.audit == nil {
+		return
+	}
 	_ = s.audit.WriteAudit(ctx, &domain.AuditLog{
 		RequestID:       reqCtx.RequestID,
 		TenantID:        principal.TenantID,
@@ -395,7 +526,6 @@ func (s *FilmService) writeAuditLog(
 	})
 }
 
-// mapKeys extracts keys from a map as a sorted slice
 func mapKeys(m map[string]bool) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

@@ -35,165 +35,30 @@ func (m *mockAuditLogRepository) Create(ctx context.Context, log *domain.AuditLo
 	return nil
 }
 
-// mockPolicyEnforcer implements service.PolicyEnforcer interface for testing
-type mockPolicyEnforcer struct {
-	auditDecision      service.AuthorizationDecision
-	auditErr           error
-	auditReadCalls     int
-	lastPrincipal      service.Principal
-	lastRequestContext service.RequestContext
+type mockAuditAuthorizer struct {
+	decision  service.Decision
+	err       error
+	calls     int
+	lastInput service.PolicyInput
 }
 
-func (m *mockPolicyEnforcer) EvaluateAuditRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-) (service.AuthorizationDecision, error) {
-	m.auditReadCalls++
-	m.lastPrincipal = principal
-	m.lastRequestContext = reqCtx
-	return m.auditDecision, m.auditErr
+func (m *mockAuditAuthorizer) Authorize(_ context.Context, input service.PolicyInput) (service.Decision, error) {
+	m.calls++
+	m.lastInput = input
+	return m.decision, m.err
 }
 
-func (m *mockPolicyEnforcer) EvaluatePerfRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-// Implement other PolicyEnforcer methods (not used in audit tests)
-func (m *mockPolicyEnforcer) EvaluateFilmCreate(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EvaluateFilmUpdateTime(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	filmID string,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EnforceFilmRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	film service.FilmReadInput,
-) (service.FilmReadResult, error) {
-	return service.FilmReadResult{}, nil
-}
-
-// Hall policy stubs (not used in audit tests)
-func (m *mockPolicyEnforcer) EvaluateHallCreate(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	ownerUserID string,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EvaluateHallRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	hallID string,
-	ownerUserID string,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EnforceHallRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	hall service.HallReadInput,
-) (service.HallReadResult, error) {
-	return service.HallReadResult{}, nil
-}
-
-// Spectator policy stubs (not used in audit tests)
-func (m *mockPolicyEnforcer) EvaluateSpectatorCreate(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	ownerUserID string,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EvaluateSpectatorSearch(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-) (service.AuthorizationDecision, error) {
-	return service.AuthorizationDecision{Allow: true}, nil
-}
-
-func (m *mockPolicyEnforcer) EnforceSpectatorRead(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	spectator service.SpectatorReadInput,
-) (service.SpectatorReadResult, error) {
-	return service.SpectatorReadResult{}, nil
-}
-
-func (m *mockPolicyEnforcer) EnforceFilmCreate(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	input service.FilmCreatePlain,
-) (service.FilmCreateEncrypted, error) {
-	return service.FilmCreateEncrypted{
-		Title:         input.Title,
-		TimeElapsedCT: "vault:v1:encrypted",
-	}, nil
-}
-
-func (m *mockPolicyEnforcer) EnforceSpectatorCreate(
-	ctx context.Context,
-	principal service.Principal,
-	reqCtx service.RequestContext,
-	input service.SpectatorCreatePlain,
-) (service.SpectatorCreateEncrypted, error) {
-	return service.SpectatorCreateEncrypted{}, nil
-}
-
-func (m *mockPolicyEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
-	return "vault:v1:encrypted", nil
-}
-
-func (m *mockPolicyEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
-	return "decrypted", nil
-}
-
-func (m *mockPolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
-	return []byte("test-pepper"), nil
-}
-
-func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, enforcer *mockPolicyEnforcer) (*Server, string, *mockAuditLogRepository) {
+func newTestServerWithAudit(t *testing.T, auditRepo *mockAuditLogRepository, authorizer *mockAuditAuthorizer) (*Server, string, *mockAuditLogRepository) {
 	t.Helper()
 
 	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
-		// If no enforcer provided, create a default one that allows
-		if enforcer == nil {
-			enforcer = &mockPolicyEnforcer{
-				auditDecision: service.AuthorizationDecision{Allow: true, Reason: "test_allow"},
+		if authorizer == nil {
+			authorizer = &mockAuditAuthorizer{
+				decision: service.Decision{Allow: true, Reason: "test_allow"},
 			}
 		}
-		b.WithEnforcer(enforcer)
-
-		// Create audit service with mock repository if provided
 		if auditRepo != nil {
-			auditService := service.NewAuditService(auditRepo, enforcer, slog.Default())
+			auditService := service.NewAuditService(auditRepo, authorizer, slog.Default())
 			b.WithAuditService(auditService)
 		}
 	})
@@ -336,15 +201,14 @@ func TestAudit_NonAdminRole_Returns403(t *testing.T) {
 func TestAudit_DCS_Deny_Returns403(t *testing.T) {
 	auditRepo := &mockAuditLogRepository{logs: []*domain.AuditLog{}}
 
-	// Enforcer that denies access
-	enforcer := &mockPolicyEnforcer{
-		auditDecision: service.AuthorizationDecision{
+	authorizer := &mockAuditAuthorizer{
+		decision: service.Decision{
 			Allow:  false,
 			Reason: "dcs_policy_deny",
 		},
 	}
 
-	server, adminToken, _ := newTestServerWithAudit(t, auditRepo, enforcer)
+	server, adminToken, _ := newTestServerWithAudit(t, auditRepo, authorizer)
 
 	req := httptest.NewRequest(http.MethodGet, "/audit", nil)
 	req.Header.Set("Authorization", adminToken)
@@ -361,14 +225,12 @@ func TestAudit_DCS_Deny_Returns403(t *testing.T) {
 		t.Fatalf("failed to parse error response: %v", err)
 	}
 
-	// Verify DCS was called
-	if enforcer.auditReadCalls != 1 {
-		t.Errorf("expected DCS EvaluateAuditRead to be called once, got %d", enforcer.auditReadCalls)
+	if authorizer.calls != 1 {
+		t.Errorf("expected authorizer called once, got %d", authorizer.calls)
 	}
 
-	// Verify principal was passed correctly
-	if enforcer.lastPrincipal.TenantID != "t1" {
-		t.Errorf("expected principal.TenantID='t1', got %q", enforcer.lastPrincipal.TenantID)
+	if authorizer.lastInput.Access.Principal.TenantID != "t1" {
+		t.Errorf("expected principal.TenantID='t1', got %q", authorizer.lastInput.Access.Principal.TenantID)
 	}
 }
 
@@ -707,15 +569,14 @@ func TestAudit_DCS_CalledWithCorrectParams(t *testing.T) {
 
 	auditRepo := &mockAuditLogRepository{logs: mockLogs}
 
-	// Enforcer that allows and tracks calls
-	enforcer := &mockPolicyEnforcer{
-		auditDecision: service.AuthorizationDecision{
+	authorizer := &mockAuditAuthorizer{
+		decision: service.Decision{
 			Allow:  true,
 			Reason: "audit_allowed",
 		},
 	}
 
-	server, _, _ := newTestServerWithAudit(t, auditRepo, enforcer)
+	server, _, _ := newTestServerWithAudit(t, auditRepo, authorizer)
 
 	// Generate token for specific tenant
 	token, err := server.jwtService.GenerateToken(
@@ -741,28 +602,25 @@ func TestAudit_DCS_CalledWithCorrectParams(t *testing.T) {
 		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Verify DCS was called exactly once
-	if enforcer.auditReadCalls != 1 {
-		t.Errorf("expected EvaluateAuditRead called once, got %d", enforcer.auditReadCalls)
+	if authorizer.calls != 1 {
+		t.Errorf("expected authorizer called once, got %d", authorizer.calls)
 	}
 
-	// Verify Principal passed to DCS
-	if enforcer.lastPrincipal.TenantID != "tenant-test" {
-		t.Errorf("expected principal.TenantID='tenant-test', got %q", enforcer.lastPrincipal.TenantID)
+	if authorizer.lastInput.Access.Principal.TenantID != "tenant-test" {
+		t.Errorf("expected principal.TenantID='tenant-test', got %q", authorizer.lastInput.Access.Principal.TenantID)
 	}
-	if enforcer.lastPrincipal.UserID != "user-123" {
-		t.Errorf("expected principal.UserID='user-123', got %q", enforcer.lastPrincipal.UserID)
+	if authorizer.lastInput.Access.Principal.UserID != "user-123" {
+		t.Errorf("expected principal.UserID='user-123', got %q", authorizer.lastInput.Access.Principal.UserID)
 	}
-	if enforcer.lastPrincipal.Role != "admin" {
-		t.Errorf("expected principal.Role='admin', got %q", enforcer.lastPrincipal.Role)
+	if authorizer.lastInput.Access.Principal.Role != "admin" {
+		t.Errorf("expected principal.Role='admin', got %q", authorizer.lastInput.Access.Principal.Role)
 	}
 
-	// Verify RequestContext passed to DCS
-	if enforcer.lastRequestContext.RequestID != "req-test-123" {
-		t.Errorf("expected requestContext.RequestID='req-test-123', got %q", enforcer.lastRequestContext.RequestID)
+	if authorizer.lastInput.Access.Request.RequestID != "req-test-123" {
+		t.Errorf("expected requestContext.RequestID='req-test-123', got %q", authorizer.lastInput.Access.Request.RequestID)
 	}
-	if enforcer.lastRequestContext.Env != "dev" {
-		t.Errorf("expected requestContext.Env='dev', got %q", enforcer.lastRequestContext.Env)
+	if authorizer.lastInput.Access.Request.Env != "dev" {
+		t.Errorf("expected requestContext.Env='dev', got %q", authorizer.lastInput.Access.Request.Env)
 	}
 
 	// Verify repository was called with correct tenant

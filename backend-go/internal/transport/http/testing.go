@@ -8,12 +8,6 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
 	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
@@ -27,7 +21,11 @@ import (
 // TestDependenciesBuilder provides a fluent API for building test dependencies
 // Allows easy customization of individual dependencies for focused testing
 type TestDependenciesBuilder struct {
-	deps Dependencies
+	deps                 Dependencies
+	authorizer           service.Authorizer
+	classificationReader service.ClassificationMetadataReader
+	bindingDeps          securedrepo.BindingDependencies
+	logger               *slog.Logger
 }
 
 func newHTTPAuthorizer(rt *config.DCSRuntime, cm *infracache.Manager, cfg *config.DCSConfig) service.Authorizer {
@@ -63,45 +61,7 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		KeyID:          dcsConfig.Binding.KeyID,
 		Secret:         []byte(cfg.DCSBindingHMACKey),
 	})
-	classificationStore := &pip.StaticClassificationStore{
-		ByResource: map[string]map[string]types.Classification{
-			"film": {
-				"title":        types.ClassificationPublic,
-				"time_elapsed": types.ClassificationSensitive,
-			},
-			"hall": {
-				"name":            types.ClassificationPublic,
-				"owner_user_id":   types.ClassificationInternal,
-				"current_film_id": types.ClassificationInternal,
-			},
-			"spectator": {
-				"name":        types.ClassificationPII,
-				"age":         types.ClassificationSensitive,
-				"external_id": types.ClassificationPII,
-			},
-		},
-	}
-
-	legacyRT := legacyruntime.Wrap(rt)
-	legacyCache := legacycache.NewManager(legacyRT, legacycache.Options{
-		MaxEntries:        100,
-		ClassificationTTL: 60,
-		PDPTTL:            60,
-		KMSTTL:            60,
-		PepperTTL:         60,
-	})
-
-	pipProvider := pip.NewProvider(legacyRT, legacyCache, classificationStore, pip.Config{
-		Env:            cfg.Env,
-		Channel:        "web",
-		Purpose:        "access",
-		DeviceTrust:    1.0,
-		ClientIPHeader: "X-Forwarded-For",
-	})
 	authorizer := newHTTPAuthorizer(rt, cm, dcsConfig)
-	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
-	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	dcsEnforcer := enforcer.New(pipProvider, authorizer, filmApplier, spectatorApplier, kmsClient, "")
 
 	// Setup repositories (in-memory with seed data)
 	seedCT, _ := kmsClient.Encrypt(context.Background(), "120")
@@ -145,6 +105,24 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		Verifier:    bindingManager,
 		Issuer:      bindingManager,
 		LabelIssuer: labelIssuer,
+		Authorizer:  authorizer,
+		Crypto:      kmsClient,
+		ClassificationReader: service.NewStaticClassificationReader(map[string][]domain.FieldClassification{
+			"film": {
+				{ResourceType: "film", FieldName: "title", Classification: "PUBLIC"},
+				{ResourceType: "film", FieldName: "time_elapsed", Classification: "SENSITIVE"},
+			},
+			"hall": {
+				{ResourceType: "hall", FieldName: "name", Classification: "PUBLIC"},
+				{ResourceType: "hall", FieldName: "owner_user_id", Classification: "INTERNAL"},
+				{ResourceType: "hall", FieldName: "current_film_id", Classification: "INTERNAL"},
+			},
+			"spectator": {
+				{ResourceType: "spectator", FieldName: "name", Classification: "PII"},
+				{ResourceType: "spectator", FieldName: "age", Classification: "SENSITIVE"},
+				{ResourceType: "spectator", FieldName: "external_id", Classification: "PII"},
+			},
+		}),
 	}
 	seedAccess := service.AccessContext{
 		Principal: service.Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"},
@@ -157,12 +135,12 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 
 	// No audit/perf services in tests by default (can be added via With methods)
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, dcsEnforcer, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, dcsEnforcer, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, dcsEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	filmService := service.NewFilmService(filmSecureRepo, dcsEnforcer, nil, nil, rt)
-	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, dcsEnforcer, nil, nil, rt)
-	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, dcsEnforcer, nil, nil, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
+	filmService := service.NewFilmService(filmSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	hallService := service.NewHallServiceWithSecureRepo(hallSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorSecureRepo, hallRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
 
 	return &TestDependenciesBuilder{
 		deps: Dependencies{
@@ -170,7 +148,6 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 			Logger:           logger,
 			Runtime:          rt,
 			Cache:            cm,
-			Enforcer:         dcsEnforcer,
 			FilmService:      filmService,
 			HallService:      hallService,
 			SpectatorService: spectatorService,
@@ -179,13 +156,11 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 			PerfService:      nil, // No perf by default
 			JWTService:       jwtService,
 		},
+		authorizer:           authorizer,
+		classificationReader: bindingDeps.ClassificationReader,
+		bindingDeps:          bindingDeps,
+		logger:               logger,
 	}
-}
-
-// WithEnforcer overrides the DCS enforcer
-func (b *TestDependenciesBuilder) WithEnforcer(enforcer service.PolicyEnforcer) *TestDependenciesBuilder {
-	b.deps.Enforcer = enforcer
-	return b
 }
 
 // WithFilmService overrides the film service
@@ -240,6 +215,51 @@ func (b *TestDependenciesBuilder) WithConfig(cfg *config.Config) *TestDependenci
 func (b *TestDependenciesBuilder) WithRuntime(rt *config.DCSRuntime) *TestDependenciesBuilder {
 	b.deps.Runtime = rt
 	return b
+}
+
+func (b *TestDependenciesBuilder) NewSecureHallService(raw service.HallRepository) service.HallService {
+	if raw != nil {
+		records, err := raw.ListByTenant(context.Background(), "t1")
+		if err == nil {
+			access := service.AccessContext{
+				Principal: service.Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"},
+				Request:   service.RequestContext{RequestID: "seed-hall", Channel: "seed", Purpose: "test", Env: "test"},
+			}
+			for _, record := range records {
+				label, err := b.bindingDeps.LabelIssuer.Issue(context.Background(), access, service.Resource{Type: "hall", ID: record.ID, TenantID: record.TenantID})
+				if err != nil {
+					panic(err)
+				}
+				binding, err := b.bindingDeps.Issuer.Create(context.Background(), hallBindingPayload{
+					ResourceType:  "hall",
+					TenantID:      record.TenantID,
+					ID:            record.ID,
+					Name:          record.Name,
+					OwnerUserID:   record.OwnerUserID,
+					CurrentFilmID: record.CurrentFilmID,
+				}, label)
+				if err != nil {
+					panic(err)
+				}
+				if err := b.bindingDeps.Store.Upsert(context.Background(), service.ResourceBinding{
+					TenantID:     record.TenantID,
+					ResourceType: "hall",
+					ResourceID:   record.ID,
+					Label:        label,
+					Binding:      binding,
+				}); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+	secureRepo := securedrepo.NewHallRepository(raw, b.logger.With(slog.String("component", "secured_hall_repository")), b.bindingDeps)
+	return service.NewHallServiceWithSecureRepo(secureRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
+}
+
+func (b *TestDependenciesBuilder) NewSecureSpectatorService(raw service.SpectatorRepository, hallRepo service.HallRepository) *service.SpectatorService {
+	secureRepo := securedrepo.NewSpectatorRepository(raw, b.deps.Runtime, b.logger.With(slog.String("component", "secured_spectator_repository")), b.bindingDeps)
+	return service.NewSpectatorServiceWithSecureRepo(secureRepo, hallRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
 }
 
 // Build returns the constructed Dependencies struct

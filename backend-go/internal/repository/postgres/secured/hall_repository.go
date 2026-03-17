@@ -4,39 +4,42 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
+
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
+	securitymask "github.com/neoweyss/poc-dcs/backend-go/internal/security/mask"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
 type HallRepository struct {
-	raw             service.HallRepository
-	enforcer        service.PolicyEnforcer
-	logger          *slog.Logger
-	bindingStore    service.BindingStore
-	bindingVerifier service.BindingVerifier
-	bindingIssuer   service.BindingIssuer
-	labelIssuer     service.LabelIssuer
+	raw                  service.HallRepository
+	classificationReader service.ClassificationMetadataReader
+	logger               *slog.Logger
+	bindingStore         service.BindingStore
+	bindingVerifier      service.BindingVerifier
+	bindingIssuer        service.BindingIssuer
+	labelIssuer          service.LabelIssuer
 }
 
-func NewHallRepository(raw service.HallRepository, enforcer service.PolicyEnforcer, logger *slog.Logger, deps ...BindingDependencies) *HallRepository {
+func NewHallRepository(raw service.HallRepository, logger *slog.Logger, deps ...BindingDependencies) *HallRepository {
 	var bindingDeps BindingDependencies
 	if len(deps) > 0 {
 		bindingDeps = deps[0]
 	}
 	return &HallRepository{
-		raw:             raw,
-		enforcer:        enforcer,
-		logger:          logger,
-		bindingStore:    bindingDeps.Store,
-		bindingVerifier: bindingDeps.Verifier,
-		bindingIssuer:   bindingDeps.Issuer,
-		labelIssuer:     bindingDeps.LabelIssuer,
+		raw:                  raw,
+		classificationReader: bindingDeps.ClassificationReader,
+		logger:               logger,
+		bindingStore:         bindingDeps.Store,
+		bindingVerifier:      bindingDeps.Verifier,
+		bindingIssuer:        bindingDeps.Issuer,
+		labelIssuer:          bindingDeps.LabelIssuer,
 	}
 }
 
-func (r *HallRepository) ListByTenant(ctx context.Context, tenantID string) ([]service.HallReadView, error) {
-	access, err := r.accessContext(ctx)
+func (r *HallRepository) ListCandidates(ctx context.Context, tenantID string) ([]service.HallReadCandidate, error) {
+	_, err := r.accessContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -56,103 +59,162 @@ func (r *HallRepository) ListByTenant(ctx context.Context, tenantID string) ([]s
 		return nil, err
 	}
 
-	views := make([]service.HallReadView, 0, len(records))
+	candidates := make([]service.HallReadCandidate, 0, len(records))
 	for _, record := range records {
 		if err := r.verifyBinding(ctx, record, bindings); err != nil {
 			return nil, err
 		}
-		view, err := r.secureRecord(ctx, access, record)
+		resource, err := service.BuildHallReadResource(ctx, r.classificationReader, record)
 		if err != nil {
 			return nil, err
 		}
 
 		spectatorCount, _ := r.raw.CountSpectators(ctx, tenantID, record.ID)
-		view.Output.SpectatorCount = spectatorCount
-		views = append(views, view)
+		candidates = append(candidates, service.HallReadCandidate{
+			Record:         record,
+			Resource:       resource,
+			SpectatorCount: spectatorCount,
+		})
 	}
 
-	return views, nil
+	return candidates, nil
 }
 
-func (r *HallRepository) Create(ctx context.Context, hall *domain.Hall) (service.HallReadView, error) {
+func (r *HallRepository) Create(ctx context.Context, tenantID string, input service.HallCreateInput, decision service.Decision) (service.HallReadCandidate, error) {
 	access, err := r.accessContext(ctx)
 	if err != nil {
-		return service.HallReadView{}, err
+		return service.HallReadCandidate{}, err
 	}
+	if !decision.Allow {
+		return service.HallReadCandidate{}, forbiddenFromDecision(decision, map[string]interface{}{"resource_type": "hall"})
+	}
+	hall := &domain.Hall{
+		TenantID:      tenantID,
+		ID:            uuid.New().String(),
+		Name:          input.Name,
+		OwnerUserID:   input.OwnerUserID,
+		CurrentFilmID: input.CurrentFilmID,
+	}
+	return r.persistCreate(ctx, access, hall)
+}
+
+func (r *HallRepository) persistCreate(ctx context.Context, access service.AccessContext, hall *domain.Hall) (service.HallReadCandidate, error) {
 	if err := ensureBindingWriteDependencies(BindingDependencies{
 		Store: r.bindingStore, Verifier: r.bindingVerifier, Issuer: r.bindingIssuer, LabelIssuer: r.labelIssuer,
 	}); err != nil {
-		return service.HallReadView{}, err
+		return service.HallReadCandidate{}, err
 	}
 
 	if txRepo, ok := r.raw.(hallTxRepository); ok {
 		if txStore, ok := r.bindingStore.(bindingTxStore); ok {
 			if err := r.createInTx(ctx, txRepo, txStore, access, hall); err != nil {
-				return service.HallReadView{}, err
+				return service.HallReadCandidate{}, err
 			}
-			view, err := r.secureRecord(ctx, access, service.HallRecord{TenantID: hall.TenantID, ID: hall.ID, Name: hall.Name, OwnerUserID: hall.OwnerUserID, CurrentFilmID: hall.CurrentFilmID})
+			record := service.HallRecord{TenantID: hall.TenantID, ID: hall.ID, Name: hall.Name, OwnerUserID: hall.OwnerUserID, CurrentFilmID: hall.CurrentFilmID}
+			resource, err := service.BuildHallReadResource(ctx, r.classificationReader, record)
 			if err != nil {
-				return service.HallReadView{}, err
+				return service.HallReadCandidate{}, err
 			}
-			view.Output.SpectatorCount = 0
-			return view, nil
+			return service.HallReadCandidate{Record: record, Resource: resource, SpectatorCount: 0}, nil
 		}
 	}
 
 	stop := perf.Span(ctx, "db_ms")
-	err = r.raw.Create(ctx, hall)
+	err := r.raw.Create(ctx, hall)
 	stop()
 	if err != nil {
-		return service.HallReadView{}, err
+		return service.HallReadCandidate{}, err
 	}
 
 	if err := r.writeBinding(ctx, access, hall); err != nil {
-		return service.HallReadView{}, err
+		return service.HallReadCandidate{}, err
 	}
 
-	view, err := r.secureRecord(ctx, access, service.HallRecord{
+	record := service.HallRecord{
 		TenantID:      hall.TenantID,
 		ID:            hall.ID,
 		Name:          hall.Name,
 		OwnerUserID:   hall.OwnerUserID,
 		CurrentFilmID: hall.CurrentFilmID,
-	})
-	if err != nil {
-		return service.HallReadView{}, err
 	}
-	view.Output.SpectatorCount = 0
-
-	return view, nil
+	resource, err := service.BuildHallReadResource(ctx, r.classificationReader, record)
+	if err != nil {
+		return service.HallReadCandidate{}, err
+	}
+	return service.HallReadCandidate{Record: record, Resource: resource, SpectatorCount: 0}, nil
 }
 
-func (r *HallRepository) secureRecord(ctx context.Context, access service.AccessContext, record service.HallRecord) (service.HallReadView, error) {
-	result, err := r.enforcer.EnforceHallRead(ctx, access.Principal, access.Request, service.HallReadInput{
-		HallID:        record.ID,
-		Name:          record.Name,
-		OwnerUserID:   record.OwnerUserID,
-		CurrentFilmID: record.CurrentFilmID,
-	})
-	if err != nil {
-		return service.HallReadView{}, err
+func (r *HallRepository) ApplyReadDecision(ctx context.Context, candidate service.HallReadCandidate, decision service.Decision) (service.HallReadView, error) {
+	if !decision.Allow {
+		return service.HallReadView{}, forbiddenFromDecision(decision, map[string]interface{}{"resource_type": "hall", "resource_id": candidate.Record.ID})
 	}
+
+	trackFields := decision.Reason != "dcs_off"
+	fieldsMasked := []string{}
+	fieldsDenied := []string{}
+
+	var name *string
+	switch r.hallAction(decision, "name") {
+	case service.FieldActionDeny:
+		if trackFields {
+			fieldsDenied = append(fieldsDenied, "name")
+		}
+	case service.FieldActionMaskAfterDecrypt:
+		masked := securitymask.String(candidate.Record.Name)
+		name = &masked
+		if trackFields {
+			fieldsMasked = append(fieldsMasked, "name")
+		}
+	default:
+		value := candidate.Record.Name
+		name = &value
+	}
+
+	owner := r.shapeHallID(candidate.Record.OwnerUserID, r.hallAction(decision, "owner_user_id"), "owner_user_id", trackFields, &fieldsMasked, &fieldsDenied)
+	currentFilm := r.shapeHallID(candidate.Record.CurrentFilmID, r.hallAction(decision, "current_film_id"), "current_film_id", trackFields, &fieldsMasked, &fieldsDenied)
 
 	view := service.HallReadView{
 		Output: service.HallOutput{
-			ID:            record.ID,
-			Name:          result.Name,
-			OwnerUserID:   result.OwnerUserID,
-			CurrentFilmID: result.CurrentFilmID,
+			ID:             candidate.Record.ID,
+			Name:           name,
+			OwnerUserID:    owner,
+			CurrentFilmID:  currentFilm,
+			SpectatorCount: candidate.SpectatorCount,
 		},
-		FieldsMasked:  result.FieldsMasked,
-		FieldsDenied:  result.FieldsDenied,
-		DecisionHash:  result.DecisionHash,
-		PolicyID:      result.PolicyID,
-		PolicyVersion: result.PolicyVersion,
+		FieldsMasked:  fieldsMasked,
+		FieldsDenied:  fieldsDenied,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}
-
-	r.logTechnicalRead(access, record, view)
-
+	if access, err := r.accessContext(ctx); err == nil {
+		r.logTechnicalRead(withAction(access, service.ActionHallRead), candidate.Record, view)
+	}
 	return view, nil
+}
+
+func (r *HallRepository) hallAction(decision service.Decision, field string) service.FieldAction {
+	if action, ok := decision.FieldActions[field]; ok && action != "" {
+		return action
+	}
+	return service.FieldActionAllow
+}
+
+func (r *HallRepository) shapeHallID(value string, action service.FieldAction, field string, trackFields bool, masked *[]string, denied *[]string) interface{} {
+	switch action {
+	case service.FieldActionMaskAfterDecrypt:
+		if trackFields {
+			*masked = append(*masked, field)
+		}
+		return securitymask.UUID(value)
+	case service.FieldActionDeny:
+		if trackFields {
+			*denied = append(*denied, field)
+		}
+		return nil
+	default:
+		return value
+	}
 }
 
 func (r *HallRepository) accessContext(ctx context.Context) (service.AccessContext, error) {

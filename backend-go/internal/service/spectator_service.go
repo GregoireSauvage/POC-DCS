@@ -5,60 +5,38 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
-
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
 // SpectatorService provides spectator business operations
 type SpectatorService struct {
-	repo       SpectatorRepository
-	secureRepo SecureSpectatorRepository
-	hallRepo   HallRepository
-	enforcer   PolicyEnforcer
-	audit      AuditWriter
-	perf       PerfWriter
-	runtime    RuntimeSettings
-}
-
-// NewSpectatorService creates a new spectator service
-func NewSpectatorService(
-	repo SpectatorRepository,
-	hallRepo HallRepository,
-	enforcer PolicyEnforcer,
-	audit AuditWriter,
-	perf PerfWriter,
-	runtime RuntimeSettings,
-) *SpectatorService {
-	return &SpectatorService{
-		repo:     repo,
-		hallRepo: hallRepo,
-		enforcer: enforcer,
-		audit:    audit,
-		perf:     perf,
-		runtime:  runtime,
-	}
+	secureRepo           SecureSpectatorRepository
+	hallRepo             HallRepository
+	authorizer           Authorizer
+	classificationReader ClassificationMetadataReader
+	audit                AuditWriter
+	perf                 PerfWriter
+	runtime              RuntimeSettings
 }
 
 func NewSpectatorServiceWithSecureRepo(
-	repo SpectatorRepository,
 	secureRepo SecureSpectatorRepository,
 	hallRepo HallRepository,
-	enforcer PolicyEnforcer,
+	authorizer Authorizer,
+	classificationReader ClassificationMetadataReader,
 	audit AuditWriter,
 	perf PerfWriter,
 	runtime RuntimeSettings,
 ) *SpectatorService {
 	return &SpectatorService{
-		repo:       repo,
-		secureRepo: secureRepo,
-		hallRepo:   hallRepo,
-		enforcer:   enforcer,
-		audit:      audit,
-		perf:       perf,
-		runtime:    runtime,
+		secureRepo:           secureRepo,
+		hallRepo:             hallRepo,
+		authorizer:           authorizer,
+		classificationReader: classificationReader,
+		audit:                audit,
+		perf:                 perf,
+		runtime:              runtime,
 	}
 }
 
@@ -72,7 +50,6 @@ func (s *SpectatorService) Create(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionSpectatorCreate)
 
-	// 1. Validate hall exists
 	hall, err := s.hallRepo.FindByID(ctx, principal.TenantID, input.HallID)
 	if err != nil {
 		return SpectatorOutput{}, pctx, err
@@ -81,130 +58,101 @@ func (s *SpectatorService) Create(
 		return SpectatorOutput{}, pctx, ErrNotFound
 	}
 
-	// 2. Authorize and encrypt (enforcer handles both PDP + PEP)
-	encrypted, err := s.enforcer.EnforceSpectatorCreate(ctx, principal, reqCtx, SpectatorCreatePlain{
-		HallID:     input.HallID,
-		Name:       input.Name,
-		Age:        input.Age,
-		ExternalID: input.ExternalID,
-	})
+	writeResource, err := BuildSpectatorWriteResource(ctx, s.classificationReader, principal.TenantID, "", hall.OwnerUserID, nil)
 	if err != nil {
-		// Enforcer returns ErrForbidden if denied
+		return SpectatorOutput{}, pctx, fmt.Errorf("build spectator.create resource: %w", err)
+	}
+	writeDecision, err := s.authorize(ctx, ActionSpectatorCreate, writeResource)
+	if err != nil {
+		return SpectatorOutput{}, pctx, fmt.Errorf("authorize spectator.create: %w", err)
+	}
+	if !writeDecision.Allow {
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
 		}
-		// Audit log for deny (Python parity)
-		if errors.Is(err, ErrForbidden) && s.audit != nil {
-			// Extract decision hash and details from ForbiddenError if available
-			var forbiddenErr *ForbiddenError
-			decisionHash := ""
-			details := map[string]interface{}(nil)
-			policyID := ""
-			policyVersion := ""
-			if errors.As(err, &forbiddenErr) {
-				decisionHash = forbiddenErr.DecisionHash
-				details = forbiddenErr.Details
-				policyID = forbiddenErr.PolicyID
-				policyVersion = forbiddenErr.PolicyVersion
-			}
-			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
-		}
-		return SpectatorOutput{}, pctx, err
-	}
-
-	// 3. Create spectator entity with encrypted data
-	spectatorID := uuid.New().String()
-	spectator := &domain.Spectator{
-		TenantID:         principal.TenantID,
-		ID:               spectatorID,
-		HallID:           encrypted.HallID,
-		NameCT:           encrypted.NameCT,
-		AgeCT:            encrypted.AgeCT,
-		ExternalIDCT:     encrypted.ExternalIDCT,
-		ExternalIDLookup: encrypted.ExternalIDLookup,
-	}
-
-	if s.secureRepo != nil {
-		view, err := s.secureRepo.Create(ctx, spectator)
-		if err != nil {
-			if errors.Is(err, ErrForbidden) {
-				if s.audit != nil {
-					var forbiddenErr *ForbiddenError
-					decisionHash := ""
-					policyID := ""
-					policyVersion := ""
-					details := map[string]interface{}(nil)
-					if errors.As(err, &forbiddenErr) {
-						decisionHash = forbiddenErr.DecisionHash
-						policyID = forbiddenErr.PolicyID
-						policyVersion = forbiddenErr.PolicyVersion
-						details = forbiddenErr.Details
-					}
-					s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", spectator.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
-				}
-				if s.perf != nil {
-					s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
-				}
-				return SpectatorOutput{}, pctx, ErrForbidden
-			}
-			return SpectatorOutput{}, pctx, err
-		}
-
 		if s.audit != nil {
-			details := map[string]interface{}{"hall_id": input.HallID}
-			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
-				spectator.ID, "allow", view.DecisionHash, view.PolicyID, view.PolicyVersion, details,
-				view.FieldsDecrypted, view.FieldsMasked, view.FieldsDenied)
+			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", writeDecision.Hash, writeDecision.PolicyID, writeDecision.PolicyVersion,
+				map[string]interface{}{"reason": writeDecision.Reason}, nil, nil, nil)
+		}
+		return SpectatorOutput{}, pctx, ErrForbidden
+	}
+
+	candidate, err := s.secureRepo.Create(ctx, principal.TenantID, input, writeDecision)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				details := map[string]interface{}(nil)
+				policyID := ""
+				policyVersion := ""
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					details = forbiddenErr.Details
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
+			}
+			return SpectatorOutput{}, pctx, ErrForbidden
+		}
+		return SpectatorOutput{}, pctx, err
+	}
+
+	readDecision, err := s.authorize(ctx, ActionSpectatorRead, candidate.Resource)
+	if err != nil {
+		return SpectatorOutput{}, pctx, fmt.Errorf("authorize spectator.read after create: %w", err)
+	}
+	if !readDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", candidate.Record.ID, "deny", readDecision.Hash, readDecision.PolicyID, readDecision.PolicyVersion,
+				map[string]interface{}{"reason": readDecision.Reason}, nil, nil, nil)
 		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
 		}
-
-		return view.Output, pctx, nil
+		return SpectatorOutput{}, pctx, ErrForbidden
 	}
 
-	// 4. Insert into DB
-	if err := s.repo.Create(ctx, spectator); err != nil {
-		return SpectatorOutput{}, pctx, err
-	}
-
-	// 7. Apply read policy (read-shaped response - Python parity)
-	result, err := s.enforcer.EnforceSpectatorRead(ctx, principal, reqCtx, SpectatorReadInput{
-		SpectatorID:  spectator.ID,
-		HallID:       spectator.HallID,
-		NameCT:       spectator.NameCT,
-		AgeCT:        spectator.AgeCT,
-		ExternalIDCT: spectator.ExternalIDCT,
-	})
+	view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
 	if err != nil {
-		return SpectatorOutput{}, pctx, err
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				details := map[string]interface{}(nil)
+				policyID := ""
+				policyVersion := ""
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					details = forbiddenErr.Details
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", candidate.Record.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
+			}
+			return SpectatorOutput{}, pctx, ErrForbidden
+		}
+		return SpectatorOutput{}, pctx, fmt.Errorf("apply spectator.read decision: %w", err)
 	}
 
-	// 8. Mask spectator ID (conditional on DCS mode - Python parity)
-	// Python: str(sp.id) if (p.role == "admin" or not dcs_enabled()) else mask_uuid(str(sp.id))
-	var spectatorIDOutput interface{} = spectator.ID
-	if s.runtime.DcsEnabled() && principal.Role != "admin" {
-		spectatorIDOutput = pep.MaskUUID(spectator.ID)
-	}
-
-	// 9. Audit + Perf (with details - Python parity line 141)
 	if s.audit != nil {
 		details := map[string]interface{}{"hall_id": input.HallID}
 		s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
-			spectator.ID, "allow", result.DecisionHash, result.PolicyID, result.PolicyVersion, details,
-			result.FieldsDecrypted, result.FieldsMasked, result.FieldsDenied)
+			fmt.Sprint(view.Output.ID), "allow", view.DecisionHash, view.PolicyID, view.PolicyVersion, details,
+			view.FieldsDecrypted, view.FieldsMasked, view.FieldsDenied)
 	}
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
 	}
 
-	return SpectatorOutput{
-		ID:         spectatorIDOutput,
-		HallID:     spectator.HallID,
-		Name:       result.Name,
-		Age:        result.Age,
-		ExternalID: result.ExternalID,
-	}, pctx, nil
+	return view.Output, pctx, nil
 }
 
 // Search searches spectators by external_id using HMAC lookup
@@ -217,8 +165,72 @@ func (s *SpectatorService) Search(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionSearchSpectator)
 
-	if s.secureRepo != nil {
-		views, err := s.secureRepo.SearchByExternalID(ctx, principal.TenantID, externalID)
+	searchResource, err := BuildSpectatorSearchResource(ctx, s.classificationReader, principal.TenantID)
+	if err != nil {
+		return nil, pctx, fmt.Errorf("build search.spectator resource: %w", err)
+	}
+	searchDecision, err := s.authorize(ctx, ActionSearchSpectator, searchResource)
+	if err != nil {
+		return nil, pctx, fmt.Errorf("authorize search.spectator: %w", err)
+	}
+	if !searchDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
+				searchDecision.Hash, searchDecision.PolicyID, searchDecision.PolicyVersion, map[string]interface{}{"reason": searchDecision.Reason}, nil, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
+		}
+		return nil, pctx, ErrForbidden
+	}
+
+	candidates, err := s.secureRepo.SearchCandidatesByExternalID(ctx, principal.TenantID, externalID, searchDecision)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
+					decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
+			}
+			return nil, pctx, ErrForbidden
+		}
+		return nil, pctx, err
+	}
+
+	out := make([]SpectatorOutput, 0, len(candidates))
+	policyID := ""
+	policyVersion := ""
+	decisionHash := ""
+	for _, candidate := range candidates {
+		readDecision, err := s.authorize(ctx, ActionSpectatorRead, candidate.Resource)
+		if err != nil {
+			return nil, pctx, fmt.Errorf("authorize spectator.read: %w", err)
+		}
+		if !readDecision.Allow {
+			if s.audit != nil {
+				s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", candidate.Record.ID, "deny",
+					readDecision.Hash, readDecision.PolicyID, readDecision.PolicyVersion, map[string]interface{}{"reason": readDecision.Reason}, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
+			}
+			return nil, pctx, ErrForbidden
+		}
+
+		view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
@@ -233,7 +245,7 @@ func (s *SpectatorService) Search(
 						policyVersion = forbiddenErr.PolicyVersion
 						details = forbiddenErr.Details
 					}
-					s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
+					s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", candidate.Record.ID, "deny",
 						decisionHash, policyID, policyVersion, details, nil, nil, nil)
 				}
 				if s.perf != nil {
@@ -241,103 +253,16 @@ func (s *SpectatorService) Search(
 				}
 				return nil, pctx, ErrForbidden
 			}
-			return nil, pctx, err
+			return nil, pctx, fmt.Errorf("apply spectator.read decision: %w", err)
 		}
-
-		out := make([]SpectatorOutput, 0, len(views))
-		for _, view := range views {
-			out = append(out, view.Output)
+		out = append(out, view.Output)
+		if decisionHash == "" {
+			policyID = view.PolicyID
+			policyVersion = view.PolicyVersion
+			decisionHash = view.DecisionHash
 		}
-
-		if s.audit != nil {
-			policyID := ""
-			policyVersion := ""
-			decisionHash := ""
-			if len(views) > 0 {
-				policyID = views[0].PolicyID
-				policyVersion = views[0].PolicyVersion
-				decisionHash = views[0].DecisionHash
-			}
-			details := map[string]interface{}{"matches": len(out)}
-			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
-				decisionHash, policyID, policyVersion, details, nil, nil, nil)
-		}
-		if s.perf != nil {
-			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
-		}
-
-		return out, pctx, nil
 	}
 
-	// 1. Evaluate search.spectator policy
-	decision, err := s.enforcer.EvaluateSpectatorSearch(ctx, principal, reqCtx)
-	if err != nil {
-		return nil, pctx, err
-	}
-	if !decision.Allow {
-		// Audit + perf logging on deny
-		if s.audit != nil {
-			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
-				decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
-		}
-		if s.perf != nil {
-			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
-		}
-		return nil, pctx, ErrForbidden
-	}
-
-	// 2. Compute HMAC lookup
-	pepper, err := s.enforcer.GetPepper(ctx, DefaultSpectatorPepperPath)
-	if err != nil {
-		return nil, pctx, fmt.Errorf("get pepper: %w", err)
-	}
-	normalized := NormalizeExternalID(externalID)
-	lookup := ComputeHMACLookup(pepper, normalized)
-
-	// 3. Query by lookup
-	spectators, err := s.repo.FindByExternalIDLookup(ctx, principal.TenantID, lookup)
-	if err != nil {
-		return nil, pctx, err
-	}
-
-	// 4. Apply read policy to each result
-	out := make([]SpectatorOutput, 0, len(spectators))
-	policyID := ""
-	policyVersion := ""
-	decisionHash := ""
-	for _, sp := range spectators {
-		result, err := s.enforcer.EnforceSpectatorRead(ctx, principal, reqCtx, SpectatorReadInput{
-			SpectatorID:  sp.ID,
-			HallID:       sp.HallID,
-			NameCT:       sp.NameCT,
-			AgeCT:        sp.AgeCT,
-			ExternalIDCT: sp.ExternalIDCT,
-		})
-		if err != nil {
-			return nil, pctx, err
-		}
-		if policyID == "" {
-			policyID = result.PolicyID
-			policyVersion = result.PolicyVersion
-			decisionHash = result.DecisionHash
-		}
-
-		// Mask spectator ID for non-admin when DCS enabled
-		var spectatorIDOutput interface{} = sp.ID
-		if s.runtime.DcsEnabled() && principal.Role != "admin" {
-			spectatorIDOutput = pep.MaskUUID(sp.ID)
-		}
-
-		out = append(out, SpectatorOutput{
-			ID:         spectatorIDOutput,
-			HallID:     sp.HallID,
-			Name:       result.Name,
-			Age:        result.Age,
-			ExternalID: result.ExternalID,
-		})
-	}
-
-	// 5. Audit + Perf (with matches count - Python parity line 286)
 	if s.audit != nil {
 		details := map[string]interface{}{"matches": len(out)}
 		s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
@@ -348,6 +273,18 @@ func (s *SpectatorService) Search(
 	}
 
 	return out, pctx, nil
+}
+
+func (s *SpectatorService) authorize(ctx context.Context, action Action, resource Resource) (Decision, error) {
+	if s.authorizer == nil {
+		return Decision{}, ErrForbidden
+	}
+	access, ok := AccessContextFromContext(ctx)
+	if !ok {
+		return Decision{}, &ForbiddenError{Reason: "missing_access_context"}
+	}
+	access.Action = action
+	return s.authorizer.Authorize(ctx, PolicyInput{Access: access, Resource: resource})
 }
 
 // writeAuditLog writes an audit log entry
@@ -401,7 +338,7 @@ func (s *SpectatorService) writePerfLog(
 	action string,
 	resourceType string,
 ) {
-	if s.perf == nil {
+	if s.perf == nil || s.runtime == nil {
 		return
 	}
 

@@ -13,14 +13,20 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
+func newTestServerWithLegacyHallRepo(t *testing.T, hallRepo service.HallRepository) *Server {
+	t.Helper()
+	return newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
+		b.WithHallService(b.NewSecureHallService(hallRepo))
+	})
+}
+
 // ==================== GET /halls TESTS ====================
 
 func TestGetHalls_AdminSeesAllFields(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
 	})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	req := httptest.NewRequest(http.MethodGet, "/halls", nil)
@@ -49,7 +55,7 @@ func TestGetHalls_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "user-12345678", CurrentFilmID: "film-87654321"},
 	})
 	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
-		hallService := service.NewHallService(hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
+		hallService := b.NewSecureHallService(hallRepo)
 		b.WithHallService(hallService)
 	})
 
@@ -85,7 +91,7 @@ func TestGetHalls_AgentSeesINTERNAL(t *testing.T) {
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-agent", CurrentFilmID: "film-1"},
 	})
 	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
-		hallService := service.NewHallService(hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
+		hallService := b.NewSecureHallService(hallRepo)
 		b.WithHallService(hallService)
 	})
 
@@ -109,9 +115,8 @@ func TestGetHalls_AgentSeesINTERNAL(t *testing.T) {
 // TestGetHalls_NoJWT skipped - /halls uses optionalJWTMiddleware which falls back to X-headers in dev
 
 func TestGetHalls_EmptyHalls_ReturnsEmptyArray(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	req := httptest.NewRequest(http.MethodGet, "/halls", nil)
@@ -134,9 +139,8 @@ func TestGetHalls_EmptyHalls_ReturnsEmptyArray(t *testing.T) {
 // ==================== POST /halls TESTS ====================
 
 func TestPostHalls_AdminAllowed(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	payload := map[string]interface{}{
@@ -168,9 +172,8 @@ func TestPostHalls_AdminAllowed(t *testing.T) {
 }
 
 func TestPostHalls_AgentAllowed(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 
 	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-agent", TenantID: "t1", Username: "agent", Role: "agent", Scopes: []string{"cinema"},
@@ -195,9 +198,8 @@ func TestPostHalls_AgentAllowed(t *testing.T) {
 }
 
 func TestPostHalls_DeveloperForbidden(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 
 	token, _ := server.jwtService.GenerateToken(auth.JWTSubject{
 		UserID: "u-dev", TenantID: "t1", Username: "dev", Role: "developer",
@@ -222,9 +224,8 @@ func TestPostHalls_DeveloperForbidden(t *testing.T) {
 }
 
 func TestPostHalls_MissingName_Returns400(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	payload := map[string]interface{}{
@@ -245,9 +246,8 @@ func TestPostHalls_MissingName_Returns400(t *testing.T) {
 }
 
 func TestPostHalls_EmptyName_Returns400(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	payload := map[string]interface{}{
@@ -269,9 +269,8 @@ func TestPostHalls_EmptyName_Returns400(t *testing.T) {
 }
 
 func TestPostHalls_InvalidJSON_Returns400(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	req := httptest.NewRequest(http.MethodPost, "/halls", bytes.NewReader([]byte("invalid json")))
@@ -286,9 +285,8 @@ func TestPostHalls_InvalidJSON_Returns400(t *testing.T) {
 }
 
 func TestHalls_MethodDispatch(t *testing.T) {
-	server := newTestServer(t)
 	hallRepo := memory.NewHallRepository([]domain.Hall{})
-	server.hallService = service.NewHallService(hallRepo, server.enforcer, nil, nil, nil)
+	server := newTestServerWithLegacyHallRepo(t, hallRepo)
 	token := adminAuthHeader(t, server)
 
 	// Test unsupported method

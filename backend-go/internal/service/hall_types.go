@@ -61,6 +61,12 @@ type HallReadView struct {
 	PolicyVersion string
 }
 
+type HallReadCandidate struct {
+	Record         HallRecord
+	Resource       Resource
+	SpectatorCount int
+}
+
 // HallRepository defines hall data access operations
 type HallRepository interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]HallRecord, error)
@@ -70,8 +76,9 @@ type HallRepository interface {
 }
 
 type SecureHallRepository interface {
-	ListByTenant(ctx context.Context, tenantID string) ([]HallReadView, error)
-	Create(ctx context.Context, hall *domain.Hall) (HallReadView, error)
+	ListCandidates(ctx context.Context, tenantID string) ([]HallReadCandidate, error)
+	Create(ctx context.Context, tenantID string, input HallCreateInput, decision Decision) (HallReadCandidate, error)
+	ApplyReadDecision(ctx context.Context, candidate HallReadCandidate, decision Decision) (HallReadView, error)
 }
 
 // HallService defines hall business operations

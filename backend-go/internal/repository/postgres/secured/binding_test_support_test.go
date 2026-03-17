@@ -7,6 +7,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
+	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
@@ -49,6 +50,7 @@ func newTestBindingDeps(t *testing.T) BindingDependencies {
 		Verifier:    manager,
 		Issuer:      manager,
 		LabelIssuer: labelIssuer,
+		Crypto:      infrakms.NewLocalClient(),
 	}
 }
 

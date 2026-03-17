@@ -10,28 +10,27 @@ import (
 
 // AuditService handles audit logging
 type AuditService struct {
-	repo     repository.AuditLogRepository
-	enforcer PolicyEnforcer
-	logger   *slog.Logger
+	repo       repository.AuditLogRepository
+	authorizer Authorizer
+	logger     *slog.Logger
 }
 
-// NewAuditService creates a new audit service
 func NewAuditService(
 	repo repository.AuditLogRepository,
-	enforcer PolicyEnforcer,
+	authorizer Authorizer,
 	logger *slog.Logger,
 ) *AuditService {
 	return &AuditService{
-		repo:     repo,
-		enforcer: enforcer,
-		logger:   logger,
+		repo:       repo,
+		authorizer: authorizer,
+		logger:     logger,
 	}
 }
 
 // WriteAudit writes an audit log entry
 func (s *AuditService) WriteAudit(ctx context.Context, log *domain.AuditLog) error {
 	if s == nil {
-		return nil // Graceful degradation when audit service is nil
+		return nil
 	}
 	if s.repo == nil {
 		s.logger.Warn("audit repository not configured, skipping audit log")
@@ -59,14 +58,16 @@ func (s *AuditService) WriteAudit(ctx context.Context, log *domain.AuditLog) err
 		return err
 	}
 
-	s.logger.Debug("audit log written",
-		slog.String("request_id", log.RequestID),
-		slog.String("action", log.Action),
-		slog.String("outcome", log.Outcome),
-		slog.Int("fields_decrypted", len(log.FieldsDecrypted)),
-		slog.Int("fields_masked", len(log.FieldsMasked)),
-		slog.Int("fields_denied", len(log.FieldsDenied)),
-	)
+	if s.logger != nil {
+		s.logger.Debug("audit log written",
+			slog.String("request_id", log.RequestID),
+			slog.String("action", log.Action),
+			slog.String("outcome", log.Outcome),
+			slog.Int("fields_decrypted", len(log.FieldsDecrypted)),
+			slog.Int("fields_masked", len(log.FieldsMasked)),
+			slog.Int("fields_denied", len(log.FieldsDenied)),
+		)
+	}
 
 	return nil
 }
@@ -78,14 +79,23 @@ func (s *AuditService) List(
 	reqCtx RequestContext,
 	limit int,
 ) ([]*domain.AuditLog, error) {
-	if s.enforcer != nil {
-		decision, err := s.enforcer.EvaluateAuditRead(ctx, principal, reqCtx)
+	if s.authorizer != nil {
+		decision, err := s.authorizer.Authorize(ctx, PolicyInput{
+			Access: AccessContext{Principal: principal, Request: reqCtx, Action: ActionAuditRead},
+			Resource: Resource{
+				Type:     "audit",
+				TenantID: principal.TenantID,
+				Fields:   map[string]FieldMeta{},
+			},
+		})
 		if err != nil {
 			return nil, err
 		}
 		if !decision.Allow {
 			return nil, ErrForbidden
 		}
+	} else {
+		return nil, ErrDCSNotConfigured
 	}
 
 	if s.repo == nil {

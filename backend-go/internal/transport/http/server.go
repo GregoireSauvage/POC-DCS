@@ -20,7 +20,6 @@ type Server struct {
 	mux              *nethttp.ServeMux
 	runtime          *config.DCSRuntime
 	cache            *cache.Manager
-	enforcer         service.PolicyEnforcer
 	filmFlow         *service.FilmService
 	hallService      service.HallService
 	spectatorService *service.SpectatorService
@@ -41,7 +40,6 @@ func NewServer(deps Dependencies) *Server {
 		mux:              mux,
 		runtime:          deps.Runtime,
 		cache:            deps.Cache,
-		enforcer:         deps.Enforcer,
 		filmFlow:         deps.FilmService,
 		hallService:      deps.HallService,
 		spectatorService: deps.SpectatorService,

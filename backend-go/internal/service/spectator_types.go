@@ -83,7 +83,13 @@ type SpectatorReadView struct {
 	PolicyVersion   string
 }
 
+type SpectatorReadCandidate struct {
+	Record   *domain.Spectator
+	Resource Resource
+}
+
 type SecureSpectatorRepository interface {
-	Create(ctx context.Context, spectator *domain.Spectator) (SpectatorReadView, error)
-	SearchByExternalID(ctx context.Context, tenantID string, externalID string) ([]SpectatorReadView, error)
+	Create(ctx context.Context, tenantID string, input SpectatorCreateInput, decision Decision) (SpectatorReadCandidate, error)
+	SearchCandidatesByExternalID(ctx context.Context, tenantID string, externalID string, decision Decision) ([]SpectatorReadCandidate, error)
+	ApplyReadDecision(ctx context.Context, candidate SpectatorReadCandidate, decision Decision) (SpectatorReadView, error)
 }

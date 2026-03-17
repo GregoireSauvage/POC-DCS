@@ -66,10 +66,10 @@ func (e *DcsEnforcer) EvaluateFilmCreate(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
-		PolicyID:     decision.PolicyID,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
 		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
@@ -85,10 +85,10 @@ func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
-		PolicyID:     decision.PolicyID,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
 		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
@@ -121,10 +121,10 @@ func (e *DcsEnforcer) EvaluateAuditRead(
 		slog.String("reason", decision.Reason),
 	)
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
-		PolicyID:     decision.PolicyID,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
 		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
@@ -150,10 +150,10 @@ func (e *DcsEnforcer) EvaluatePerfRead(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
-		PolicyID:     decision.PolicyID,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
 		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
@@ -162,20 +162,20 @@ func (e *DcsEnforcer) EnforceFilmRead(
 	ctx context.Context,
 	principal service.Principal,
 	reqCtx service.RequestContext,
-	film service.FilmReadInput,
-) (service.FilmReadResult, error) {
+	film filmReadInput,
+) (filmReadResult, error) {
 	decision, err := e.evaluate(ctx, principal, reqCtx, string(service.ActionFilmRead), film.FilmID)
 	if err != nil {
-		return service.FilmReadResult{}, err
+		return filmReadResult{}, err
 	}
 	result, err := e.filmApplier.Apply(ctx, toDCSDecision(decision), pep.FilmRow{
 		Title:         film.Title,
 		TimeElapsedCT: film.TimeElapsedCT,
 	})
 	if err != nil {
-		return service.FilmReadResult{}, err
+		return filmReadResult{}, err
 	}
-	return service.FilmReadResult{
+	return filmReadResult{
 		TimeElapsed:     result.Payload["time_elapsed"],
 		FieldsDecrypted: result.Decrypted,
 		FieldsMasked:    result.Masked,
@@ -193,8 +193,8 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 	ctx context.Context,
 	principal service.Principal,
 	reqCtx service.RequestContext,
-	input service.FilmCreatePlain,
-) (service.FilmCreateEncrypted, error) {
+	input filmCreatePlain,
+) (filmCreateEncrypted, error) {
 	pi, err := e.pip.Build(ctx, pip.Input{
 		Principal:    toDCSPrincipal(principal),
 		Action:       string(service.ActionFilmCreate),
@@ -202,18 +202,18 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 		Request:      toDCSRequestContext(reqCtx),
 	})
 	if err != nil {
-		return service.FilmCreateEncrypted{}, fmt.Errorf("pip build failed: %w", err)
+		return filmCreateEncrypted{}, fmt.Errorf("pip build failed: %w", err)
 	}
 
 	decision, err := e.authorizePolicyInput(ctx, pi)
 	if err != nil {
-		return service.FilmCreateEncrypted{}, err
+		return filmCreateEncrypted{}, err
 	}
 	if !decision.Allow {
-		return service.FilmCreateEncrypted{}, &service.ForbiddenError{
-			DecisionHash: decision.Hash,
-			Reason:       decision.Reason,
-			PolicyID:     decision.PolicyID,
+		return filmCreateEncrypted{}, &service.ForbiddenError{
+			DecisionHash:  decision.Hash,
+			Reason:        decision.Reason,
+			PolicyID:      decision.PolicyID,
 			PolicyVersion: decision.PolicyVersion,
 		}
 	}
@@ -222,10 +222,10 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 	timeElapsedCT, err := e.kms.Encrypt(ctx, strconv.Itoa(input.TimeElapsed))
 	stop()
 	if err != nil {
-		return service.FilmCreateEncrypted{}, fmt.Errorf("encrypt time_elapsed: %w", err)
+		return filmCreateEncrypted{}, fmt.Errorf("encrypt time_elapsed: %w", err)
 	}
 
-	return service.FilmCreateEncrypted{
+	return filmCreateEncrypted{
 		Title:         input.Title,
 		TimeElapsedCT: timeElapsedCT,
 	}, nil

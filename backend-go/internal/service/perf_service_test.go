@@ -27,85 +27,24 @@ type mockPerfLogRepository struct {
 	lastAllCache      bool
 }
 
-// mockPolicyEnforcer mocks the PolicyEnforcer for DCS testing
-type mockPolicyEnforcer struct {
-	evalPerfReadDecision AuthorizationDecision
-	evalPerfReadError    error
-	evalPerfReadCalls    int
-	lastPrincipal        *Principal
-	lastReqCtx           *RequestContext
+type mockPerfAuthorizer struct {
+	decision      Decision
+	err           error
+	authorizeCalls int
+	lastPrincipal *Principal
+	lastReqCtx    *RequestContext
 }
 
-func (m *mockPolicyEnforcer) EvaluatePerfRead(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
-	m.evalPerfReadCalls++
+func (m *mockPerfAuthorizer) Authorize(ctx context.Context, input PolicyInput) (Decision, error) {
+	principal := input.Access.Principal
+	reqCtx := input.Access.Request
+	m.authorizeCalls++
 	m.lastPrincipal = &principal
 	m.lastReqCtx = &reqCtx
-	return m.evalPerfReadDecision, m.evalPerfReadError
-}
-
-// Stub implementations for other enforcer methods (not used in perf tests)
-func (m *mockPolicyEnforcer) EvaluateFilmCreate(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EvaluateFilmUpdateTime(ctx context.Context, principal Principal, reqCtx RequestContext, filmID string) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EnforceFilmRead(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmReadInput) (FilmReadResult, error) {
-	return FilmReadResult{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EvaluateAuditRead(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-// Hall policy stubs (not used in perf tests)
-func (m *mockPolicyEnforcer) EvaluateHallCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EvaluateHallRead(ctx context.Context, principal Principal, reqCtx RequestContext, hallID string, ownerUserID string) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EnforceHallRead(ctx context.Context, principal Principal, reqCtx RequestContext, hall HallReadInput) (HallReadResult, error) {
-	return HallReadResult{}, errors.New("not implemented")
-}
-
-// Spectator policy stubs (not used in perf tests)
-func (m *mockPolicyEnforcer) EvaluateSpectatorCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EvaluateSpectatorSearch(ctx context.Context, principal Principal, reqCtx RequestContext) (AuthorizationDecision, error) {
-	return AuthorizationDecision{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EnforceSpectatorRead(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error) {
-	return SpectatorReadResult{}, errors.New("not implemented")
-}
-
-// Crypto delegation stubs
-func (m *mockPolicyEnforcer) Encrypt(ctx context.Context, plaintext string) (string, error) {
-	return "encrypted-" + plaintext, nil
-}
-
-func (m *mockPolicyEnforcer) Decrypt(ctx context.Context, ciphertext string) (string, error) {
-	return "decrypted", nil
-}
-
-func (m *mockPolicyEnforcer) GetPepper(ctx context.Context, path string) ([]byte, error) {
-	return []byte("test-pepper"), nil
-}
-
-// Enforce create stubs
-func (m *mockPolicyEnforcer) EnforceFilmCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input FilmCreatePlain) (FilmCreateEncrypted, error) {
-	return FilmCreateEncrypted{}, errors.New("not implemented")
-}
-
-func (m *mockPolicyEnforcer) EnforceSpectatorCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
-	return SpectatorCreateEncrypted{}, errors.New("not implemented")
+	if m.err != nil {
+		return Decision{}, m.err
+	}
+	return m.decision, nil
 }
 
 func (m *mockPerfLogRepository) Create(ctx context.Context, log *domain.PerfLog) error {
@@ -155,8 +94,8 @@ func TestPerfService_List_Admin(t *testing.T) {
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
 	// Use enforcer that allows access (DCS required - no fallback)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -225,8 +164,8 @@ func TestPerfService_Write_RepoError(t *testing.T) {
 func TestPerfService_List_NonAdmin(t *testing.T) {
 	repo := &mockPerfLogRepository{}
 	// Use enforcer that denies access (simulates PDP denying non-admin)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: false},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: false},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -245,8 +184,8 @@ func TestPerfService_List_NonAdmin(t *testing.T) {
 func TestPerfService_List_RepoError(t *testing.T) {
 	repo := &mockPerfLogRepository{listErr: errors.New("db error")}
 	// Use enforcer that allows (we want to test repo error, not enforcer denial)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -269,8 +208,8 @@ func TestPerfService_Summary_Admin(t *testing.T) {
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
 	// Use enforcer that allows access (DCS required - no fallback)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -304,8 +243,8 @@ func TestPerfService_Summary_Admin(t *testing.T) {
 func TestPerfService_Summary_NonAdmin(t *testing.T) {
 	repo := &mockPerfLogRepository{}
 	// Use enforcer that denies access (simulates PDP denying non-admin)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: false},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: false},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -324,8 +263,8 @@ func TestPerfService_Summary_NonAdmin(t *testing.T) {
 func TestPerfService_Summary_RepoError(t *testing.T) {
 	repo := &mockPerfLogRepository{summaryErr: errors.New("db error")}
 	// Use enforcer that allows (we want to test repo error, not enforcer denial)
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -345,8 +284,8 @@ func TestPerfService_List_EnforcerAllows(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -360,8 +299,8 @@ func TestPerfService_List_EnforcerAllows(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("expected 1 log, got %d", len(logs))
 	}
-	if enforcer.evalPerfReadCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.evalPerfReadCalls)
+	if enforcer.authorizeCalls != 1 {
+		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
 	}
 	if repo.listCalls != 1 {
 		t.Fatalf("expected repo called once (enforcer allowed), got %d", repo.listCalls)
@@ -372,8 +311,8 @@ func TestPerfService_List_EnforcerDenies(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: false},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: false},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -384,8 +323,8 @@ func TestPerfService_List_EnforcerDenies(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
 	}
-	if enforcer.evalPerfReadCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.evalPerfReadCalls)
+	if enforcer.authorizeCalls != 1 {
+		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
 	}
 	if repo.listCalls != 0 {
 		t.Fatalf("expected repo NOT called when enforcer denies, got %d calls", repo.listCalls)
@@ -394,8 +333,8 @@ func TestPerfService_List_EnforcerDenies(t *testing.T) {
 
 func TestPerfService_List_EnforcerError(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadError: errors.New("pdp unavailable"),
+	enforcer := &mockPerfAuthorizer{
+		err: errors.New("pdp unavailable"),
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -452,8 +391,8 @@ func TestPerfService_List_EnforcerCalledBeforeRepo(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: false}, // Deny
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: false}, // Deny
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -463,8 +402,8 @@ func TestPerfService_List_EnforcerCalledBeforeRepo(t *testing.T) {
 	_, _ = svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 
 	// Enforcer should be called first
-	if enforcer.evalPerfReadCalls != 1 {
-		t.Fatalf("expected enforcer called, got %d", enforcer.evalPerfReadCalls)
+	if enforcer.authorizeCalls != 1 {
+		t.Fatalf("expected enforcer called, got %d", enforcer.authorizeCalls)
 	}
 	// Repo should NOT be called (enforcer denied)
 	if repo.listCalls != 0 {
@@ -477,8 +416,8 @@ func TestPerfService_Summary_EnforcerAllows(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: true},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: true},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -492,8 +431,8 @@ func TestPerfService_Summary_EnforcerAllows(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 summary row, got %d", len(rows))
 	}
-	if enforcer.evalPerfReadCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.evalPerfReadCalls)
+	if enforcer.authorizeCalls != 1 {
+		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
 	}
 	if repo.summaryCalls != 1 {
 		t.Fatalf("expected repo summary called once, got %d", repo.summaryCalls)
@@ -504,8 +443,8 @@ func TestPerfService_Summary_EnforcerDenies(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
-	enforcer := &mockPolicyEnforcer{
-		evalPerfReadDecision: AuthorizationDecision{Allow: false},
+	enforcer := &mockPerfAuthorizer{
+		decision: Decision{Allow: false},
 	}
 	svc := NewPerfService(repo, enforcer, "go")
 
@@ -516,8 +455,8 @@ func TestPerfService_Summary_EnforcerDenies(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
 	}
-	if enforcer.evalPerfReadCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.evalPerfReadCalls)
+	if enforcer.authorizeCalls != 1 {
+		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
 	}
 	if repo.summaryCalls != 0 {
 		t.Fatalf("expected repo NOT called when enforcer denies, got %d calls", repo.summaryCalls)

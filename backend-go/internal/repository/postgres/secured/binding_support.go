@@ -13,10 +13,14 @@ import (
 )
 
 type BindingDependencies struct {
-	Store       service.BindingStore
-	Verifier    service.BindingVerifier
-	Issuer      service.BindingIssuer
-	LabelIssuer service.LabelIssuer
+	Store                service.BindingStore
+	Verifier             service.BindingVerifier
+	Issuer               service.BindingIssuer
+	LabelIssuer          service.LabelIssuer
+	Authorizer           service.Authorizer
+	Crypto               service.CryptoProvider
+	ClassificationReader service.ClassificationMetadataReader
+	Runtime              service.RuntimeSettings
 }
 
 type bindingTxStore interface {
@@ -229,4 +233,102 @@ func bindSpectatorRecords(records []*domain.Spectator) []string {
 		ids = append(ids, record.ID)
 	}
 	return ids
+}
+
+var defaultFieldClassifications = map[string]map[string]service.Classification{
+	"film": {
+		"title":        service.ClassificationPublic,
+		"time_elapsed": service.ClassificationSensitive,
+	},
+	"hall": {
+		"name":            service.ClassificationPublic,
+		"owner_user_id":   service.ClassificationInternal,
+		"current_film_id": service.ClassificationInternal,
+	},
+	"spectator": {
+		"name":        service.ClassificationPII,
+		"age":         service.ClassificationSensitive,
+		"external_id": service.ClassificationPII,
+	},
+}
+
+func withAction(access service.AccessContext, action service.Action) service.AccessContext {
+	access.Action = action
+	return access
+}
+
+func authorize(ctx context.Context, authorizer service.Authorizer, access service.AccessContext, resource service.Resource) (service.Decision, error) {
+	if authorizer == nil {
+		return service.Decision{}, bindingFailureError("authorization_not_configured", nil, nil)
+	}
+	return authorizer.Authorize(ctx, service.PolicyInput{Access: access, Resource: resource})
+}
+
+func forbiddenFromDecision(decision service.Decision, details map[string]interface{}) error {
+	merged := map[string]interface{}{}
+	for key, value := range details {
+		merged[key] = value
+	}
+	if decision.Reason != "" {
+		merged["reason"] = decision.Reason
+	}
+	return &service.ForbiddenError{
+		DecisionHash:  decision.Hash,
+		Reason:        decision.Reason,
+		PolicyID:      decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
+		Details:       merged,
+	}
+}
+
+func resourceFields(ctx context.Context, reader service.ClassificationMetadataReader, resourceType string) (map[string]service.FieldMeta, error) {
+	fields := map[string]service.FieldMeta{}
+	if defaults, ok := defaultFieldClassifications[resourceType]; ok {
+		for fieldName, classification := range defaults {
+			fields[fieldName] = service.FieldMeta{Classification: classification}
+		}
+	}
+	if reader == nil {
+		return fields, nil
+	}
+
+	classifications, err := reader.GetByResourceType(ctx, resourceType)
+	if err != nil {
+		return nil, err
+	}
+	if len(classifications) == 0 {
+		return fields, nil
+	}
+	for _, classification := range classifications {
+		fields[classification.FieldName] = service.FieldMeta{Classification: service.Classification(classification.Classification)}
+	}
+	return fields, nil
+}
+
+func hallPolicyResource(ctx context.Context, reader service.ClassificationMetadataReader, record service.HallRecord) (service.Resource, error) {
+	fields, err := resourceFields(ctx, reader, "hall")
+	if err != nil {
+		return service.Resource{}, err
+	}
+	return service.Resource{Type: "hall", ID: record.ID, TenantID: record.TenantID, Fields: fields}, nil
+}
+
+func hallWriteResource(ctx context.Context, reader service.ClassificationMetadataReader, hall *domain.Hall) (service.Resource, error) {
+	fields, err := resourceFields(ctx, reader, "hall")
+	if err != nil {
+		return service.Resource{}, err
+	}
+	return service.Resource{Type: "hall", ID: hall.ID, TenantID: hall.TenantID, Labels: append([]string(nil), hall.Labels...), Fields: fields}, nil
+}
+
+func spectatorPolicyResource(ctx context.Context, reader service.ClassificationMetadataReader, spectator *domain.Spectator) (service.Resource, error) {
+	fields, err := resourceFields(ctx, reader, "spectator")
+	if err != nil {
+		return service.Resource{}, err
+	}
+	return service.Resource{Type: "spectator", ID: spectator.ID, TenantID: spectator.TenantID, Labels: append([]string(nil), spectator.Labels...), Fields: fields}, nil
+}
+
+func spectatorWriteResource(ctx context.Context, reader service.ClassificationMetadataReader, spectator *domain.Spectator) (service.Resource, error) {
+	return spectatorPolicyResource(ctx, reader, spectator)
 }

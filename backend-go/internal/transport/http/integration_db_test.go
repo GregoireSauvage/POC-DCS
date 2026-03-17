@@ -96,7 +96,7 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	})
 	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	policyEnforcer := enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
+	_ = enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
 
 	// Repositories with DB
 	filmRepo := postgres.NewFilmRepository(db)
@@ -108,25 +108,28 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	bindingRepo := postgres.NewBindingRepository(db)
 
 	// Services
-	auditService := service.NewAuditService(auditRepo, policyEnforcer, logger)
-	perfService := service.NewPerfService(perfRepo, policyEnforcer, cfg.PerfSource)
+	auditService := service.NewAuditService(auditRepo, authorizer, logger)
+	perfService := service.NewPerfService(perfRepo, authorizer, cfg.PerfSource)
 	labelIssuer := service.NewServerLabelIssuer(
 		config.NewClassificationPolicy(dcsCfg),
 		classificationRepo,
 		map[string]service.Classification{"film": service.ClassificationSensitive, "hall": service.ClassificationInternal, "spectator": service.ClassificationPII},
 	)
 	bindingDeps := securedrepo.BindingDependencies{
-		Store:       bindingRepo,
-		Verifier:    bindingManager,
-		Issuer:      bindingManager,
-		LabelIssuer: labelIssuer,
+		Store:                bindingRepo,
+		Verifier:             bindingManager,
+		Issuer:               bindingManager,
+		LabelIssuer:          labelIssuer,
+		Authorizer:           authorizer,
+		Crypto:               kmsClient,
+		ClassificationReader: classificationRepo,
 	}
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, policyEnforcer, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, policyEnforcer, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, policyEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	filmService := service.NewFilmService(filmSecureRepo, policyEnforcer, auditService, perfService, rt)
-	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, policyEnforcer, auditService, perfService, rt)
-	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, policyEnforcer, auditService, perfService, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
+	filmService := service.NewFilmService(filmSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	hallService := service.NewHallServiceWithSecureRepo(hallSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorSecureRepo, hallRepo, authorizer, classificationRepo, auditService, perfService, rt)
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 	authService := service.NewAuthService(userRepo, jwtService)
 
@@ -135,7 +138,6 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		Logger:           logger,
 		Runtime:          rt,
 		Cache:            cm,
-		Enforcer:         policyEnforcer,
 		FilmService:      filmService,
 		HallService:      hallService,
 		SpectatorService: spectatorService,

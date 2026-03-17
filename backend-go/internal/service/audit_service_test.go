@@ -18,6 +18,18 @@ type mockAuditRepository struct {
 	listErr   error
 }
 
+type staticAuditAuthorizer struct {
+	decision Decision
+	err      error
+}
+
+func (a *staticAuditAuthorizer) Authorize(_ context.Context, _ PolicyInput) (Decision, error) {
+	if a.err != nil {
+		return Decision{}, a.err
+	}
+	return a.decision, nil
+}
+
 func (m *mockAuditRepository) Create(ctx context.Context, log *domain.AuditLog) error {
 	if m.createErr != nil {
 		return m.createErr
@@ -48,7 +60,7 @@ func TestAuditService_List_RepositoryError(t *testing.T) {
 		listErr: repository.ErrInvalidInput,
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, nil, logger)
+	auditSvc := NewAuditService(mockRepo, &staticAuditAuthorizer{decision: Decision{Allow: true}}, logger)
 
 	_, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if !errors.Is(err, repository.ErrInvalidInput) {
@@ -138,7 +150,7 @@ func TestAuditService_List(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(mockRepo, nil, logger)
+	auditSvc := NewAuditService(mockRepo, &staticAuditAuthorizer{decision: Decision{Allow: true}}, logger)
 
 	logs, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if err != nil {
@@ -158,7 +170,7 @@ func TestAuditService_List(t *testing.T) {
 
 func TestAuditService_List_NoRepository(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	auditSvc := NewAuditService(nil, nil, logger)
+	auditSvc := NewAuditService(nil, &staticAuditAuthorizer{decision: Decision{Allow: true}}, logger)
 
 	logs, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
 	if err != nil {
@@ -167,5 +179,15 @@ func TestAuditService_List_NoRepository(t *testing.T) {
 
 	if logs == nil {
 		t.Error("Expected empty slice when repo is nil")
+	}
+}
+
+func TestAuditService_List_NoAuthorizer(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditSvc := NewAuditService(&mockAuditRepository{}, nil, logger)
+
+	_, err := auditSvc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{}, 10)
+	if !errors.Is(err, ErrDCSNotConfigured) {
+		t.Fatalf("expected ErrDCSNotConfigured, got %v", err)
 	}
 }

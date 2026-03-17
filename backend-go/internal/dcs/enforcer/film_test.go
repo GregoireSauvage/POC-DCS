@@ -145,7 +145,7 @@ func TestDcsEnforcer_EvaluateFilmUpdateTime_DeveloperForbidden(t *testing.T) {
 func TestDcsEnforcer_EnforceFilmRead_DeveloperMasked(t *testing.T) {
 	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "120"})
 
-	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("developer"), defaultReqCtx(), service.FilmReadInput{
+	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("developer"), defaultReqCtx(), filmReadInput{
 		FilmID:        "f1",
 		Title:         "Interstellar",
 		TimeElapsedCT: "vault:v1:abc",
@@ -161,7 +161,7 @@ func TestDcsEnforcer_EnforceFilmRead_DeveloperMasked(t *testing.T) {
 func TestDcsEnforcer_EnforceFilmRead_AdminDecrypt(t *testing.T) {
 	e := newDcsEnforcerForTest("on", 2, defaultFilmStore(), &fakeCryptoService{value: "240"})
 
-	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), service.FilmReadInput{
+	result, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), filmReadInput{
 		FilmID:        "f1",
 		Title:         "Interstellar",
 		TimeElapsedCT: "vault:v1:abc",
@@ -178,7 +178,7 @@ func TestDcsEnforcer_EnforceFilmRead_PIPError(t *testing.T) {
 	storeErr := errors.New("classification store down")
 	e := newDcsEnforcerForTest("on", 2, &fixedClassificationStore{err: storeErr}, &fakeCryptoService{value: "240"})
 
-	_, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), service.FilmReadInput{
+	_, err := e.EnforceFilmRead(context.Background(), defaultPrincipal("admin"), defaultReqCtx(), filmReadInput{
 		FilmID:        "f1",
 		Title:         "Interstellar",
 		TimeElapsedCT: "vault:v1:abc",

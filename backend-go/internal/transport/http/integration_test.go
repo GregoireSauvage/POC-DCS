@@ -10,7 +10,6 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
 // TestIntegration_FilmLifecycle tests the complete CRUD lifecycle of a film
@@ -259,8 +258,8 @@ func TestIntegration_HallSpectatorWorkflow(t *testing.T) {
 	spectatorRepo := memory.NewSpectatorRepository()
 
 	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
-		hallService := service.NewHallService(hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
-		spectatorService := service.NewSpectatorService(spectatorRepo, hallRepo, b.deps.Enforcer, nil, nil, b.deps.Runtime)
+		hallService := b.NewSecureHallService(hallRepo)
+		spectatorService := b.NewSecureSpectatorService(spectatorRepo, hallRepo)
 		b.WithHallService(hallService)
 		b.WithSpectatorService(spectatorService)
 	})
@@ -271,9 +270,9 @@ func TestIntegration_HallSpectatorWorkflow(t *testing.T) {
 
 	// 1. Create a hall
 	createHallReq := map[string]interface{}{
-		"name":             "IMAX Hall",
-		"owner_user_id":    "u-admin",
-		"current_film_id":  "film-1",
+		"name":            "IMAX Hall",
+		"owner_user_id":   "u-admin",
+		"current_film_id": "film-1",
 	}
 	hallBody, _ := json.Marshal(createHallReq)
 
@@ -361,10 +360,10 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			name:   "invalid auth token",
-			method: http.MethodGet,
-			path:   "/audit", // Admin-only endpoint
-			token:  "invalid-token",
+			name:           "invalid auth token",
+			method:         http.MethodGet,
+			path:           "/audit", // Admin-only endpoint
+			token:          "invalid-token",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{

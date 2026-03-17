@@ -5,47 +5,34 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
-
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 )
 
 type hallService struct {
-	repo       HallRepository
-	secureRepo SecureHallRepository
-	enforcer   PolicyEnforcer
-	audit      *AuditService
-	perf       PerfWriter
-	runtime    RuntimeSettings
-}
-
-// NewHallService creates a new hall service
-func NewHallService(repo HallRepository, enforcer PolicyEnforcer, audit *AuditService, perf PerfWriter, runtime RuntimeSettings) HallService {
-	return &hallService{
-		repo:     repo,
-		enforcer: enforcer,
-		audit:    audit,
-		perf:     perf,
-		runtime:  runtime,
-	}
+	secureRepo           SecureHallRepository
+	authorizer           Authorizer
+	classificationReader ClassificationMetadataReader
+	audit                *AuditService
+	perf                 PerfWriter
+	runtime              RuntimeSettings
 }
 
 func NewHallServiceWithSecureRepo(
-	repo HallRepository,
 	secureRepo SecureHallRepository,
-	enforcer PolicyEnforcer,
+	authorizer Authorizer,
+	classificationReader ClassificationMetadataReader,
 	audit *AuditService,
 	perf PerfWriter,
 	runtime RuntimeSettings,
 ) HallService {
 	return &hallService{
-		repo:       repo,
-		secureRepo: secureRepo,
-		enforcer:   enforcer,
-		audit:      audit,
-		perf:       perf,
-		runtime:    runtime,
+		secureRepo:           secureRepo,
+		authorizer:           authorizer,
+		classificationReader: classificationReader,
+		audit:                audit,
+		perf:                 perf,
+		runtime:              runtime,
 	}
 }
 
@@ -58,8 +45,54 @@ func (s *hallService) List(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionHallRead)
 
-	if s.secureRepo != nil {
-		views, err := s.secureRepo.ListByTenant(ctx, principal.TenantID)
+	candidates, err := s.secureRepo.ListCandidates(ctx, principal.TenantID)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "hall.read", "hall", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
+			}
+			return nil, pctx, ErrForbidden
+		}
+		return nil, pctx, fmt.Errorf("failed to list halls: %w", err)
+	}
+
+	outputs := make([]HallOutput, 0, len(candidates))
+	masked := map[string]bool{}
+	denied := map[string]bool{}
+	decisionHash := ""
+	policyID := ""
+	policyVersion := ""
+	for _, candidate := range candidates {
+		decision, err := s.authorize(ctx, ActionHallRead, candidate.Resource)
+		if err != nil {
+			return nil, pctx, fmt.Errorf("authorize hall.read: %w", err)
+		}
+		if !decision.Allow {
+			if s.audit != nil {
+				s.writeAuditLog(ctx, principal, reqCtx, "hall.read", "hall", candidate.Record.ID, "deny", decision.Hash, decision.PolicyID, decision.PolicyVersion,
+					map[string]interface{}{"reason": decision.Reason}, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
+			}
+			return nil, pctx, ErrForbidden
+		}
+
+		view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, decision)
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
@@ -74,110 +107,28 @@ func (s *hallService) List(
 						policyVersion = forbiddenErr.PolicyVersion
 						details = forbiddenErr.Details
 					}
-					s.writeAuditLog(ctx, principal, reqCtx, "hall.read", "hall", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+					s.writeAuditLog(ctx, principal, reqCtx, "hall.read", "hall", candidate.Record.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil)
 				}
 				if s.perf != nil {
 					s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
 				}
 				return nil, pctx, ErrForbidden
 			}
-			return nil, pctx, fmt.Errorf("failed to list halls: %w", err)
+			return nil, pctx, fmt.Errorf("apply hall.read decision: %w", err)
 		}
 
-		outputs := make([]HallOutput, 0, len(views))
-		masked := map[string]bool{}
-		denied := map[string]bool{}
-		decisionHash := ""
-		policyID := ""
-		policyVersion := ""
-		for _, view := range views {
-			outputs = append(outputs, view.Output)
-			if decisionHash == "" {
-				decisionHash = view.DecisionHash
-				policyID = view.PolicyID
-				policyVersion = view.PolicyVersion
-			}
-			for _, field := range view.FieldsMasked {
-				masked[field] = true
-			}
-			for _, field := range view.FieldsDenied {
-				denied[field] = true
-			}
-		}
-
-		if s.audit != nil {
-			s.writeAuditLog(
-				ctx,
-				principal,
-				reqCtx,
-				"hall.read",
-				"hall",
-				"",
-				"allow",
-				decisionHash,
-				policyID,
-				policyVersion,
-				nil,
-				mapKeys(masked),
-				mapKeys(denied),
-			)
-		}
-
-		if s.perf != nil {
-			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
-		}
-
-		return outputs, pctx, nil
-	}
-
-	// 1. Fetch halls from repository
-	stop := perf.Span(ctx, "db_ms")
-	records, err := s.repo.ListByTenant(ctx, principal.TenantID)
-	stop()
-	if err != nil {
-		return nil, pctx, fmt.Errorf("failed to list halls: %w", err)
-	}
-
-	// 2. Apply field-level enforcement to each hall
-	outputs := make([]HallOutput, 0, len(records))
-	masked := map[string]bool{}
-	denied := map[string]bool{}
-	decisionHash := ""
-	policyID := ""
-	policyVersion := ""
-	for _, rec := range records {
-		// Enforce read policy
-		result, err := s.enforcer.EnforceHallRead(ctx, principal, reqCtx, HallReadInput{
-			HallID:        rec.ID,
-			Name:          rec.Name,
-			OwnerUserID:   rec.OwnerUserID,
-			CurrentFilmID: rec.CurrentFilmID,
-		})
-		if err != nil {
-			return nil, pctx, fmt.Errorf("failed to enforce hall read: %w", err)
-		}
+		outputs = append(outputs, view.Output)
 		if decisionHash == "" {
-			decisionHash = result.DecisionHash
-			policyID = result.PolicyID
-			policyVersion = result.PolicyVersion
+			decisionHash = view.DecisionHash
+			policyID = view.PolicyID
+			policyVersion = view.PolicyVersion
 		}
-		for _, field := range result.FieldsMasked {
+		for _, field := range view.FieldsMasked {
 			masked[field] = true
 		}
-		for _, field := range result.FieldsDenied {
+		for _, field := range view.FieldsDenied {
 			denied[field] = true
 		}
-
-		// 3. Compute spectator count
-		spectatorCount, _ := s.repo.CountSpectators(ctx, principal.TenantID, rec.ID)
-
-		outputs = append(outputs, HallOutput{
-			ID:             rec.ID,
-			Name:           result.Name,
-			OwnerUserID:    result.OwnerUserID,
-			CurrentFilmID:  result.CurrentFilmID,
-			SpectatorCount: spectatorCount,
-		})
 	}
 
 	if s.audit != nil {
@@ -198,7 +149,6 @@ func (s *hallService) List(
 		)
 	}
 
-	// 4. Write perf log (after successful list)
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
 	}
@@ -216,28 +166,18 @@ func (s *hallService) Create(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionHallCreate)
 
-	// 1. Authorization check
-	decision, err := s.enforcer.EvaluateHallCreate(ctx, principal, reqCtx, input.OwnerUserID)
+	writeResource, err := BuildHallWriteResource(ctx, s.classificationReader, principal.TenantID, "", input.OwnerUserID, nil)
 	if err != nil {
-		return HallOutput{}, pctx, fmt.Errorf("failed to evaluate hall create: %w", err)
+		return HallOutput{}, pctx, fmt.Errorf("build hall.create resource: %w", err)
 	}
-	if !decision.Allow {
+	writeDecision, err := s.authorize(ctx, ActionHallCreate, writeResource)
+	if err != nil {
+		return HallOutput{}, pctx, fmt.Errorf("authorize hall.create: %w", err)
+	}
+	if !writeDecision.Allow {
 		if s.audit != nil {
-			s.writeAuditLog(
-				ctx,
-				principal,
-				reqCtx,
-				"hall.create",
-				"hall",
-				"",
-				"deny",
-				decision.DecisionHash,
-				decision.PolicyID,
-				decision.PolicyVersion,
-				nil,
-				nil,
-				nil,
-			)
+			s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", "", "deny", writeDecision.Hash, writeDecision.PolicyID, writeDecision.PolicyVersion,
+				map[string]interface{}{"reason": writeDecision.Reason}, nil, nil)
 		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
@@ -245,118 +185,90 @@ func (s *hallService) Create(
 		return HallOutput{}, pctx, ErrForbidden
 	}
 
-	// 2. Create hall in repository
-	hallID := uuid.New().String()
-	hall := &domain.Hall{
-		TenantID:      principal.TenantID,
-		ID:            hallID,
-		Name:          input.Name,
-		OwnerUserID:   input.OwnerUserID,
-		CurrentFilmID: input.CurrentFilmID,
-	}
-
-	if s.secureRepo != nil {
-		view, err := s.secureRepo.Create(ctx, hall)
-		if err != nil {
-			if errors.Is(err, ErrForbidden) {
-				if s.audit != nil {
-					var forbiddenErr *ForbiddenError
-					decisionHash := ""
-					policyID := ""
-					policyVersion := ""
-					details := map[string]interface{}(nil)
-					if errors.As(err, &forbiddenErr) {
-						decisionHash = forbiddenErr.DecisionHash
-						policyID = forbiddenErr.PolicyID
-						policyVersion = forbiddenErr.PolicyVersion
-						details = forbiddenErr.Details
-					}
-					s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", hallID, "deny", decisionHash, policyID, policyVersion, details, nil, nil)
-				}
-				if s.perf != nil {
-					s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
-				}
-				return HallOutput{}, pctx, ErrForbidden
-			}
-			return HallOutput{}, pctx, fmt.Errorf("failed to create hall: %w", err)
-		}
-
-		if s.audit != nil {
-			s.writeAuditLog(
-				ctx,
-				principal,
-				reqCtx,
-				"hall.create",
-				"hall",
-				hallID,
-				"allow",
-				view.DecisionHash,
-				view.PolicyID,
-				view.PolicyVersion,
-				nil,
-				view.FieldsMasked,
-				view.FieldsDenied,
-			)
-		}
-
-		if s.perf != nil {
-			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
-		}
-
-		return view.Output, pctx, nil
-	}
-
-	stop := perf.Span(ctx, "db_ms")
-	err = s.repo.Create(ctx, hall)
-	stop()
+	candidate, err := s.secureRepo.Create(ctx, principal.TenantID, input, writeDecision)
 	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+			}
+			return HallOutput{}, pctx, ErrForbidden
+		}
 		return HallOutput{}, pctx, fmt.Errorf("failed to create hall: %w", err)
 	}
 
-	// 3. Apply READ policy to response (read-shaped response pattern)
-	result, err := s.enforcer.EnforceHallRead(ctx, principal, reqCtx, HallReadInput{
-		HallID:        hallID,
-		Name:          input.Name,
-		OwnerUserID:   input.OwnerUserID,
-		CurrentFilmID: input.CurrentFilmID,
-	})
+	readDecision, err := s.authorize(ctx, ActionHallRead, candidate.Resource)
 	if err != nil {
-		return HallOutput{}, pctx, fmt.Errorf("failed to enforce hall read: %w", err)
+		return HallOutput{}, pctx, fmt.Errorf("authorize hall.read after create: %w", err)
+	}
+	if !readDecision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", candidate.Record.ID, "deny", readDecision.Hash, readDecision.PolicyID, readDecision.PolicyVersion,
+				map[string]interface{}{"reason": readDecision.Reason}, nil, nil)
+		}
+		if s.perf != nil {
+			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+		}
+		return HallOutput{}, pctx, ErrForbidden
 	}
 
-	// 4. Return response with read permissions applied
-	output := HallOutput{
-		ID:             hallID,
-		Name:           result.Name,
-		OwnerUserID:    result.OwnerUserID,
-		CurrentFilmID:  result.CurrentFilmID,
-		SpectatorCount: 0, // New hall has no spectators
+	view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", candidate.Record.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+			}
+			return HallOutput{}, pctx, ErrForbidden
+		}
+		return HallOutput{}, pctx, fmt.Errorf("apply hall.read decision: %w", err)
 	}
 
 	if s.audit != nil {
-		s.writeAuditLog(
-			ctx,
-			principal,
-			reqCtx,
-			"hall.create",
-			"hall",
-			hallID,
-			"allow",
-			result.DecisionHash,
-			result.PolicyID,
-			result.PolicyVersion,
-			nil,
-			result.FieldsMasked,
-			result.FieldsDenied,
-		)
+		s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", fmt.Sprint(view.Output.ID), "allow", view.DecisionHash, view.PolicyID, view.PolicyVersion, nil, view.FieldsMasked, view.FieldsDenied)
 	}
-
-	// 5. Write perf log (after successful create)
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
 	}
+	return view.Output, pctx, nil
+}
 
-	return output, pctx, nil
+func (s *hallService) authorize(ctx context.Context, action Action, resource Resource) (Decision, error) {
+	if s.authorizer == nil {
+		return Decision{}, ErrForbidden
+	}
+	access, ok := AccessContextFromContext(ctx)
+	if !ok {
+		return Decision{}, &ForbiddenError{Reason: "missing_access_context"}
+	}
+	access.Action = action
+	return s.authorizer.Authorize(ctx, PolicyInput{Access: access, Resource: resource})
 }
 
 func (s *hallService) writeAuditLog(
