@@ -1,20 +1,26 @@
+// Package config is a legacy compatibility shim.
+// Deprecated: use github.com/neoweyss/poc-dcs/backend-go/internal/config.
 package config
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	canonicalconfig "github.com/neoweyss/poc-dcs/backend-go/internal/config"
+	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 )
 
-// DCSConfig represents the full DCS configuration loaded from dcs_config.json
 type DCSConfig struct {
-	PIP PIPConfig `json:"pip"`
-	PDP PDPConfig `json:"pdp"`
+	Policy PolicyConfig `json:"policy"`
+	PIP    PIPConfig    `json:"pip"`
+	PDP    PDPConfig    `json:"pdp"`
 }
 
-// PIPConfig represents the PIP section of the DCS config
+type PolicyConfig struct {
+	PolicyID            string                       `json:"policy_id"`
+	PolicyVersion       string                       `json:"policy_version"`
+	ClassificationOrder []legacytypes.Classification `json:"classification_order"`
+	AllowedCategories   []string                     `json:"allowed_categories"`
+	Markings            map[string]string            `json:"markings"`
+}
+
 type PIPConfig struct {
 	Channel        string  `json:"channel"`
 	Purpose        string  `json:"purpose"`
@@ -22,72 +28,93 @@ type PIPConfig struct {
 	ClientIPHeader string  `json:"client_ip_header"`
 }
 
-// PDPConfig represents the PDP section of the DCS config
 type PDPConfig struct {
-	DefaultClassification          types.Classification            `json:"default_classification"`
-	ReadActions                    []string                        `json:"read_actions"`
-	WriteActions                   []string                        `json:"write_actions"`
-	BootstrapActions               []string                        `json:"bootstrap_actions"`
-	AuditActions                   []string                        `json:"audit_actions"`
-	RoleClassificationActions      map[string]map[string]string    `json:"role_classification_actions"`
-	SpectatorAgentHardeningFields  []string                        `json:"spectator_agent_hardening_fields"`
+	DefaultClassification         legacytypes.Classification   `json:"default_classification"`
+	ReadActions                   []string                     `json:"read_actions"`
+	WriteActions                  []string                     `json:"write_actions"`
+	BootstrapActions              []string                     `json:"bootstrap_actions"`
+	AuditActions                  []string                     `json:"audit_actions"`
+	RoleClassificationActions     map[string]map[string]string `json:"role_classification_actions"`
+	SpectatorAgentHardeningFields []string                     `json:"spectator_agent_hardening_fields"`
+	PolicyID                      string                       `json:"-"`
+	PolicyVersion                 string                       `json:"-"`
 }
 
-// Load reads and parses the DCS config file from the given path
+// Deprecated: use internal/config.LoadDCSConfig.
 func Load(path string) (*DCSConfig, error) {
-	if path == "" {
-		return nil, fmt.Errorf("DCS_CONFIG_PATH not specified")
-	}
-
-	data, err := os.ReadFile(path)
+	cfg, err := canonicalconfig.LoadDCSConfig(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, err
 	}
-
-	var cfg DCSConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
-	}
-
-	return &cfg, nil
+	return fromCanonical(cfg), nil
 }
 
-// Defaults returns default config values (fallback when config file not available)
+// Deprecated: use internal/config.DefaultDCSConfig.
 func Defaults() *DCSConfig {
-	return &DCSConfig{
+	return fromCanonical(canonicalconfig.DefaultDCSConfig())
+}
+
+func fromCanonical(cfg *canonicalconfig.DCSConfig) *DCSConfig {
+	if cfg == nil {
+		cfg = canonicalconfig.DefaultDCSConfig()
+	}
+
+	out := &DCSConfig{
+		Policy: PolicyConfig{
+			PolicyID:            cfg.Policy.PolicyID,
+			PolicyVersion:       cfg.Policy.PolicyVersion,
+			ClassificationOrder: make([]legacytypes.Classification, 0, len(cfg.Policy.ClassificationOrder)),
+			AllowedCategories:   append([]string(nil), cfg.Policy.AllowedCategories...),
+			Markings:            cloneStringMap(cfg.Policy.Markings),
+		},
 		PIP: PIPConfig{
-			Channel:        "web",
-			Purpose:        "cinema_ops",
-			DeviceTrust:    0.8,
-			ClientIPHeader: "x-real-ip",
+			Channel:        cfg.PIP.Channel,
+			Purpose:        cfg.PIP.Purpose,
+			DeviceTrust:    cfg.PIP.DeviceTrust,
+			ClientIPHeader: cfg.PIP.ClientIPHeader,
 		},
 		PDP: PDPConfig{
-			DefaultClassification: types.ClassificationInternal,
-			ReadActions:          []string{"film.read", "hall.read", "spectator.read"},
-			WriteActions:         []string{"film.create", "hall.create", "spectator.create", "film.update_time", "search.spectator"},
-			BootstrapActions:     []string{"bootstrap"},
-			AuditActions:         []string{"audit.read", "perf.read"},
-			RoleClassificationActions: map[string]map[string]string{
-				"admin": {
-					"PUBLIC":    "allow",
-					"INTERNAL":  "allow",
-					"SENSITIVE": "decrypt",
-					"PII":       "decrypt",
-				},
-				"agent": {
-					"PUBLIC":    "allow",
-					"INTERNAL":  "allow",
-					"SENSITIVE": "decrypt",
-					"PII":       "mask_after_decrypt",
-				},
-				"developer": {
-					"PUBLIC":    "allow",
-					"INTERNAL":  "mask_after_decrypt",
-					"SENSITIVE": "mask_after_decrypt",
-					"PII":       "mask_after_decrypt",
-				},
-			},
-			SpectatorAgentHardeningFields: []string{"name", "external_id"},
+			DefaultClassification:         legacytypes.Classification(cfg.PDP.DefaultClassification),
+			ReadActions:                   append([]string(nil), cfg.PDP.ReadActions...),
+			WriteActions:                  append([]string(nil), cfg.PDP.WriteActions...),
+			BootstrapActions:              append([]string(nil), cfg.PDP.BootstrapActions...),
+			AuditActions:                  append([]string(nil), cfg.PDP.AuditActions...),
+			RoleClassificationActions:     cloneNestedStringMap(cfg.PDP.RoleClassificationActions),
+			SpectatorAgentHardeningFields: append([]string(nil), cfg.PDP.SpectatorAgentHardeningFields...),
+			PolicyID:                      cfg.Policy.PolicyID,
+			PolicyVersion:                 cfg.Policy.PolicyVersion,
 		},
 	}
+
+	for _, cls := range cfg.Policy.ClassificationOrder {
+		out.Policy.ClassificationOrder = append(out.Policy.ClassificationOrder, legacytypes.Classification(cls))
+	}
+
+	return out
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return map[string]string{}
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneNestedStringMap(src map[string]map[string]string) map[string]map[string]string {
+	if src == nil {
+		return map[string]map[string]string{}
+	}
+	dst := make(map[string]map[string]string, len(src))
+	for key, values := range src {
+		inner := make(map[string]string, len(values))
+		for innerKey, innerValue := range values {
+			inner[innerKey] = innerValue
+		}
+		dst[key] = inner
+	}
+	return dst
 }

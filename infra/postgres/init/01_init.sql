@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
   outcome          TEXT NOT NULL CHECK (outcome IN ('allow','deny','error')),
   decision_hash    TEXT,
+  policy_id        TEXT,
+  policy_version   TEXT,
 
   fields_decrypted TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   fields_masked    TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],

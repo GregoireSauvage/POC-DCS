@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
@@ -100,11 +99,15 @@ func (s *SpectatorService) Create(
 			var forbiddenErr *ForbiddenError
 			decisionHash := ""
 			details := map[string]interface{}(nil)
+			policyID := ""
+			policyVersion := ""
 			if errors.As(err, &forbiddenErr) {
 				decisionHash = forbiddenErr.DecisionHash
 				details = forbiddenErr.Details
+				policyID = forbiddenErr.PolicyID
+				policyVersion = forbiddenErr.PolicyVersion
 			}
-			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", decisionHash, details, nil, nil, nil)
+			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
 		}
 		return SpectatorOutput{}, pctx, err
 	}
@@ -130,7 +133,7 @@ func (s *SpectatorService) Create(
 		if s.audit != nil {
 			details := map[string]interface{}{"hall_id": input.HallID}
 			s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
-				spectator.ID, "allow", "", details,
+				spectator.ID, "allow", view.DecisionHash, view.PolicyID, view.PolicyVersion, details,
 				view.FieldsDecrypted, view.FieldsMasked, view.FieldsDenied)
 		}
 		if s.perf != nil {
@@ -168,7 +171,7 @@ func (s *SpectatorService) Create(
 	if s.audit != nil {
 		details := map[string]interface{}{"hall_id": input.HallID}
 		s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator",
-			spectator.ID, "allow", "", details,
+			spectator.ID, "allow", result.DecisionHash, result.PolicyID, result.PolicyVersion, details,
 			result.FieldsDecrypted, result.FieldsMasked, result.FieldsDenied)
 	}
 	if s.perf != nil {
@@ -200,7 +203,7 @@ func (s *SpectatorService) Search(
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
 					s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
-						"", nil, nil, nil, nil)
+						"", "", "", nil, nil, nil, nil)
 				}
 				if s.perf != nil {
 					s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
@@ -216,9 +219,17 @@ func (s *SpectatorService) Search(
 		}
 
 		if s.audit != nil {
+			policyID := ""
+			policyVersion := ""
+			decisionHash := ""
+			if len(views) > 0 {
+				policyID = views[0].PolicyID
+				policyVersion = views[0].PolicyVersion
+				decisionHash = views[0].DecisionHash
+			}
 			details := map[string]interface{}{"matches": len(out)}
 			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
-				"", details, nil, nil, nil)
+				decisionHash, policyID, policyVersion, details, nil, nil, nil)
 		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
@@ -236,7 +247,7 @@ func (s *SpectatorService) Search(
 		// Audit + perf logging on deny
 		if s.audit != nil {
 			s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
-				"", nil, nil, nil, nil)
+				decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
 		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
@@ -249,8 +260,8 @@ func (s *SpectatorService) Search(
 	if err != nil {
 		return nil, pctx, fmt.Errorf("get pepper: %w", err)
 	}
-	normalized := kms.NormalizeExternalID(externalID)
-	lookup := kms.ComputeHMACLookup(pepper, normalized)
+	normalized := NormalizeExternalID(externalID)
+	lookup := ComputeHMACLookup(pepper, normalized)
 
 	// 3. Query by lookup
 	spectators, err := s.repo.FindByExternalIDLookup(ctx, principal.TenantID, lookup)
@@ -260,6 +271,9 @@ func (s *SpectatorService) Search(
 
 	// 4. Apply read policy to each result
 	out := make([]SpectatorOutput, 0, len(spectators))
+	policyID := ""
+	policyVersion := ""
+	decisionHash := ""
 	for _, sp := range spectators {
 		result, err := s.enforcer.EnforceSpectatorRead(ctx, principal, reqCtx, SpectatorReadInput{
 			SpectatorID:  sp.ID,
@@ -270,6 +284,11 @@ func (s *SpectatorService) Search(
 		})
 		if err != nil {
 			return nil, pctx, err
+		}
+		if policyID == "" {
+			policyID = result.PolicyID
+			policyVersion = result.PolicyVersion
+			decisionHash = result.DecisionHash
 		}
 
 		// Mask spectator ID for non-admin when DCS enabled
@@ -291,7 +310,7 @@ func (s *SpectatorService) Search(
 	if s.audit != nil {
 		details := map[string]interface{}{"matches": len(out)}
 		s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "allow",
-			"", details, nil, nil, nil)
+			decisionHash, policyID, policyVersion, details, nil, nil, nil)
 	}
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")
@@ -310,6 +329,8 @@ func (s *SpectatorService) writeAuditLog(
 	resourceID string,
 	outcome string,
 	decisionHash string,
+	policyID string,
+	policyVersion string,
 	details map[string]interface{},
 	fieldsDecrypted []string,
 	fieldsMasked []string,
@@ -329,6 +350,8 @@ func (s *SpectatorService) writeAuditLog(
 		ResourceID:      resourceID,
 		Outcome:         outcome,
 		DecisionHash:    decisionHash,
+		PolicyID:        policyID,
+		PolicyVersion:   policyVersion,
 		Details:         details,
 		FieldsDecrypted: fieldsDecrypted,
 		FieldsMasked:    fieldsMasked,

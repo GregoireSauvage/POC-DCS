@@ -38,6 +38,18 @@ func (s *AuditService) WriteAudit(ctx context.Context, log *domain.AuditLog) err
 		return nil
 	}
 
+	if log.PolicyID != "" || log.PolicyVersion != "" {
+		if log.Details == nil {
+			log.Details = map[string]interface{}{}
+		}
+		if log.PolicyID != "" {
+			log.Details["policy_id"] = log.PolicyID
+		}
+		if log.PolicyVersion != "" {
+			log.Details["policy_version"] = log.PolicyVersion
+		}
+	}
+
 	if err := s.repo.Create(ctx, log); err != nil {
 		s.logger.Error("failed to write audit log",
 			slog.String("error", err.Error()),

@@ -39,6 +39,8 @@ func DecisionHash(decision service.Decision) string {
 		"allow":         decision.Allow,
 		"field_actions": sortedActions,
 		"reason":        decision.Reason,
+		"policy_id":     decision.PolicyID,
+		"policy_version": decision.PolicyVersion,
 	}
 	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
@@ -47,7 +49,7 @@ func DecisionHash(decision service.Decision) string {
 
 func (p *PDP) decide(input service.PolicyInput) service.Decision {
 	if input.Access.Principal.TenantID != input.Resource.TenantID {
-		return service.Decision{Allow: false, FieldActions: map[string]service.FieldAction{}, Reason: "tenant_mismatch"}
+		return p.newDecision(false, map[string]service.FieldAction{}, "tenant_mismatch")
 	}
 
 	action := input.Access.Action
@@ -76,11 +78,11 @@ func (p *PDP) decide(input service.PolicyInput) service.Decision {
 			reason = "audit_admin_only"
 		}
 	default:
-		return service.Decision{Allow: false, FieldActions: map[string]service.FieldAction{}, Reason: "unknown_action"}
+		return p.newDecision(false, map[string]service.FieldAction{}, "unknown_action")
 	}
 
 	if !allow {
-		return service.Decision{Allow: false, FieldActions: map[string]service.FieldAction{}, Reason: reason}
+		return p.newDecision(false, map[string]service.FieldAction{}, reason)
 	}
 
 	fieldActions := make(map[string]service.FieldAction, len(input.Resource.Fields))
@@ -100,5 +102,21 @@ func (p *PDP) decide(input service.PolicyInput) service.Decision {
 		}
 	}
 
-	return service.Decision{Allow: true, FieldActions: fieldActions, Reason: reason}
+	return p.newDecision(true, fieldActions, reason)
+}
+
+func (p *PDP) newDecision(allow bool, fieldActions map[string]service.FieldAction, reason string) service.Decision {
+	policyID := ""
+	policyVersion := ""
+	if p != nil && p.policy != nil {
+		policyID = p.policy.PolicyID()
+		policyVersion = p.policy.PolicyVersion()
+	}
+	return service.Decision{
+		Allow:         allow,
+		FieldActions:  fieldActions,
+		Reason:        reason,
+		PolicyID:      policyID,
+		PolicyVersion: policyVersion,
+	}
 }

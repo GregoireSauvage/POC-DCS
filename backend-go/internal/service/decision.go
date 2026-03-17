@@ -24,4 +24,6 @@ type Decision struct {
 	FieldActions map[string]FieldAction
 	Reason       string
 	Hash         string
+	PolicyID     string
+	PolicyVersion string
 }

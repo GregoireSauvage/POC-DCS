@@ -8,15 +8,15 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
+	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	securedrepo "github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres/secured"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -29,91 +29,11 @@ type TestDependenciesBuilder struct {
 	deps Dependencies
 }
 
-type httpPDPDecisionCacheAdapter struct {
-	cache *cache.TTL[string, types.Decision]
-}
-
-func newHTTPAuthorizer(rt *runtime.Settings, cm *cache.Manager, cfg *dcsconfig.DCSConfig) service.Authorizer {
-	policy := dcsconfig.NewPDPPolicy(&cfg.PDP)
+func newHTTPAuthorizer(rt *config.DCSRuntime, cm *infracache.Manager, cfg *config.DCSConfig) service.Authorizer {
+	policy := config.NewClassificationPolicy(cfg)
 	pdp := serviceauth.NewPDP(policy)
 	base := serviceauth.NewAuthorizer(rt, pdp)
-	return serviceauth.NewCachedAuthorizer(rt, &httpPDPDecisionCacheAdapter{cache: cm.PDP}, base)
-}
-
-func (a *httpPDPDecisionCacheAdapter) Get(key string) (service.Decision, bool) {
-	if a == nil || a.cache == nil {
-		return service.Decision{}, false
-	}
-	decision, ok := a.cache.Get(key)
-	if !ok {
-		return service.Decision{}, false
-	}
-	return service.Decision{
-		Allow:        decision.Allow,
-		FieldActions: httpToServiceFieldActions(decision.FieldActions),
-		Reason:       decision.Reason,
-		Hash:         decision.Hash,
-	}, true
-}
-
-func (a *httpPDPDecisionCacheAdapter) Set(key string, value service.Decision) {
-	if a == nil || a.cache == nil {
-		return
-	}
-	a.cache.Set(key, types.Decision{
-		Allow:        value.Allow,
-		FieldActions: httpToLegacyFieldActions(value.FieldActions),
-		Reason:       value.Reason,
-		Hash:         value.Hash,
-	}, 0)
-}
-
-func httpToServiceFieldActions(actions map[string]types.FieldAction) map[string]service.FieldAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make(map[string]service.FieldAction, len(actions))
-	for field, action := range actions {
-		converted[field] = httpToServiceFieldAction(action)
-	}
-	return converted
-}
-
-func httpToServiceFieldAction(action types.FieldAction) service.FieldAction {
-	switch action {
-	case types.FieldActionAllow:
-		return service.FieldActionAllow
-	case types.FieldActionDecrypt:
-		return service.FieldActionDecrypt
-	case types.FieldActionMaskAfterDecrypt:
-		return service.FieldActionMaskAfterDecrypt
-	default:
-		return service.FieldActionDeny
-	}
-}
-
-func httpToLegacyFieldActions(actions map[string]service.FieldAction) map[string]types.FieldAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make(map[string]types.FieldAction, len(actions))
-	for field, action := range actions {
-		converted[field] = httpToLegacyFieldAction(action)
-	}
-	return converted
-}
-
-func httpToLegacyFieldAction(action service.FieldAction) types.FieldAction {
-	switch action {
-	case service.FieldActionAllow:
-		return types.FieldActionAllow
-	case service.FieldActionDecrypt:
-		return types.FieldActionDecrypt
-	case service.FieldActionMaskAfterDecrypt:
-		return types.FieldActionMaskAfterDecrypt
-	default:
-		return types.FieldActionDeny
-	}
+	return serviceauth.NewCachedAuthorizer(rt, policy, cm.PDP, base)
 }
 
 // NewTestDependenciesBuilder creates a builder with sensible defaults for testing
@@ -124,18 +44,18 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// Setup infrastructure
-	rt := runtime.New("on", 1)
-	cm := cache.NewManager(rt, cache.Options{
+	rt := config.NewDCSRuntime("on", 1)
+	cm := infracache.NewManager(rt, infracache.Options{
 		MaxEntries:        100,
 		ClassificationTTL: 60,
 		PDPTTL:            60,
 		KMSTTL:            60,
 		PepperTTL:         60,
 	})
-	kmsClient := kms.NewLocalClient()
+	kmsClient := infrakms.NewLocalClient()
 
 	// Setup DCS components
-	dcsConfig := dcsconfig.Defaults() // Use defaults for tests
+	dcsConfig := config.DefaultDCSConfig() // Use defaults for tests
 	classificationStore := &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]types.Classification{
 			"film": {
@@ -155,7 +75,16 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		},
 	}
 
-	pipProvider := pip.NewProvider(rt, cm, classificationStore, pip.Config{
+	legacyRT := legacyruntime.Wrap(rt)
+	legacyCache := legacycache.NewManager(legacyRT, legacycache.Options{
+		MaxEntries:        100,
+		ClassificationTTL: 60,
+		PDPTTL:            60,
+		KMSTTL:            60,
+		PepperTTL:         60,
+	})
+
+	pipProvider := pip.NewProvider(legacyRT, legacyCache, classificationStore, pip.Config{
 		Env:            cfg.Env,
 		Channel:        "web",
 		Purpose:        "access",
@@ -163,7 +92,7 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		ClientIPHeader: "X-Forwarded-For",
 	})
 	authorizer := newHTTPAuthorizer(rt, cm, dcsConfig)
-	filmApplier := pep.NewFilmApplier(rt, kmsClient)
+	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
 	dcsEnforcer := enforcer.New(pipProvider, authorizer, filmApplier, spectatorApplier, kmsClient, "")
 
@@ -264,7 +193,7 @@ func (b *TestDependenciesBuilder) WithConfig(cfg *config.Config) *TestDependenci
 }
 
 // WithRuntime overrides the runtime settings
-func (b *TestDependenciesBuilder) WithRuntime(rt *runtime.Settings) *TestDependenciesBuilder {
+func (b *TestDependenciesBuilder) WithRuntime(rt *config.DCSRuntime) *TestDependenciesBuilder {
 	b.deps.Runtime = rt
 	return b
 }

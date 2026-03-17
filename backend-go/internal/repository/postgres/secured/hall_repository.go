@@ -97,8 +97,11 @@ func (r *HallRepository) secureRecord(ctx context.Context, access service.Access
 			OwnerUserID:   result.OwnerUserID,
 			CurrentFilmID: result.CurrentFilmID,
 		},
-		FieldsMasked: result.FieldsMasked,
-		FieldsDenied: result.FieldsDenied,
+		FieldsMasked:  result.FieldsMasked,
+		FieldsDenied:  result.FieldsDenied,
+		DecisionHash:  result.DecisionHash,
+		PolicyID:      result.PolicyID,
+		PolicyVersion: result.PolicyVersion,
 	}
 
 	r.logTechnicalRead(access, record, view)

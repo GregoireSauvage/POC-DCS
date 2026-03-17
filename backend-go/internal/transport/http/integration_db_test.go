@@ -12,14 +12,14 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
+	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
 	securedrepo "github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres/secured"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -29,17 +29,17 @@ import (
 // This duplicates the dependency construction logic for DB tests to avoid import cycles
 func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) *Server {
 	// Load DCS config
-	dcsCfg := dcsconfig.Defaults()
+	dcsCfg := config.DefaultDCSConfig()
 	if cfg.DCSConfigPath != "" {
-		loaded, err := dcsconfig.Load(cfg.DCSConfigPath)
+		loaded, err := config.LoadDCSConfig(cfg.DCSConfigPath)
 		if err == nil {
 			dcsCfg = loaded
 		}
 	}
 
 	// Setup infrastructure
-	rt := runtime.New(cfg.DCSMode, cfg.CacheLevel)
-	cm := cache.NewManager(rt, cache.Options{
+	rt := config.NewDCSRuntime(cfg.DCSMode, cfg.CacheLevel)
+	cm := infracache.NewManager(rt, infracache.Options{
 		MaxEntries:        cfg.CacheMaxEntries,
 		ClassificationTTL: cfg.CacheTTLClassif,
 		PDPTTL:            cfg.CacheTTLPDP,
@@ -50,16 +50,16 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	// KMS client
 	var kmsClient enforcer.CryptoService
 	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
-		vaultClient, err := kms.NewVaultTransitClient(
+		vaultClient, err := infrakms.NewVaultTransitClient(
 			cfg.VaultAddr, cfg.VaultToken, cfg.VaultTransitKey, cm, logger,
 		)
 		if err == nil {
 			kmsClient = vaultClient
 		} else {
-			kmsClient = kms.NewLocalClient()
+			kmsClient = infrakms.NewLocalClient()
 		}
 	} else {
-		kmsClient = kms.NewLocalClient()
+		kmsClient = infrakms.NewLocalClient()
 	}
 
 	// Classification store with DB
@@ -74,12 +74,20 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	classificationStore := pip.NewDBClassificationStore(classificationRepo, staticStore)
 
 	// DCS components
-	provider := pip.NewProvider(rt, cm, classificationStore, pip.Config{
+	legacyRT := legacyruntime.Wrap(rt)
+	legacyCache := legacycache.NewManager(legacyRT, legacycache.Options{
+		MaxEntries:        cfg.CacheMaxEntries,
+		ClassificationTTL: cfg.CacheTTLClassif,
+		PDPTTL:            cfg.CacheTTLPDP,
+		KMSTTL:            cfg.CacheTTLKMS,
+		PepperTTL:         cfg.CacheTTLPepper,
+	})
+	provider := pip.NewProvider(legacyRT, legacyCache, classificationStore, pip.Config{
 		Env: cfg.Env, Channel: dcsCfg.PIP.Channel, Purpose: dcsCfg.PIP.Purpose,
 		DeviceTrust: dcsCfg.PIP.DeviceTrust, ClientIPHeader: dcsCfg.PIP.ClientIPHeader,
 	})
 	authorizer := newHTTPAuthorizer(rt, cm, dcsCfg)
-	filmApplier := pep.NewFilmApplier(rt, kmsClient)
+	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
 	policyEnforcer := enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
 

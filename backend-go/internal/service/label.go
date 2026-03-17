@@ -7,6 +7,7 @@ import (
 
 type Label struct {
 	PolicyID       string
+	PolicyVersion  string
 	Classification Classification
 	Categories     []string
 	Originator     string

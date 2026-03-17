@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
@@ -40,9 +39,11 @@ func (e *DcsEnforcer) EvaluateSpectatorCreate(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -73,9 +74,11 @@ func (e *DcsEnforcer) EvaluateSpectatorSearch(
 		return service.AuthorizationDecision{}, err
 	}
 	return service.AuthorizationDecision{
-		Allow:        decision.Allow,
-		Reason:       decision.Reason,
-		DecisionHash: decision.Hash,
+		Allow:         decision.Allow,
+		Reason:        decision.Reason,
+		DecisionHash:  decision.Hash,
+		PolicyID:      decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -127,6 +130,9 @@ func (e *DcsEnforcer) EnforceSpectatorRead(
 		FieldsDecrypted: applied.Decrypted,
 		FieldsMasked:    applied.Masked,
 		FieldsDenied:    applied.Denied,
+		DecisionHash:    decision.Hash,
+		PolicyID:        decision.PolicyID,
+		PolicyVersion:   decision.PolicyVersion,
 	}, nil
 }
 
@@ -159,7 +165,12 @@ func (e *DcsEnforcer) EnforceSpectatorCreate(
 		return service.SpectatorCreateEncrypted{}, err
 	}
 	if !decision.Allow {
-		return service.SpectatorCreateEncrypted{}, service.ErrForbidden
+		return service.SpectatorCreateEncrypted{}, &service.ForbiddenError{
+			DecisionHash:  decision.Hash,
+			Reason:        decision.Reason,
+			PolicyID:      decision.PolicyID,
+			PolicyVersion: decision.PolicyVersion,
+		}
 	}
 
 	stop := perf.Span(ctx, "kms_ms")
@@ -185,8 +196,8 @@ func (e *DcsEnforcer) EnforceSpectatorCreate(
 		return service.SpectatorCreateEncrypted{}, fmt.Errorf("get pepper: %w", err)
 	}
 
-	normalized := kms.NormalizeExternalID(input.ExternalID)
-	lookup := kms.ComputeHMACLookup(pepper, normalized)
+	normalized := service.NormalizeExternalID(input.ExternalID)
+	lookup := service.ComputeHMACLookup(pepper, normalized)
 
 	return service.SpectatorCreateEncrypted{
 		HallID:           input.HallID,

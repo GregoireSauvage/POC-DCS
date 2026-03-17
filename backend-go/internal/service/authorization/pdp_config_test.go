@@ -3,13 +3,13 @@ package authorization
 import (
 	"testing"
 
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	appconfig "github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
 func TestPDPPolicy_DefaultMappings(t *testing.T) {
-	cfg := dcsconfig.Defaults()
-	policy := dcsconfig.NewPDPPolicy(&cfg.PDP)
+	cfg := appconfig.DefaultDCSConfig()
+	policy := appconfig.NewClassificationPolicy(cfg)
 
 	if !policy.IsReadAction(service.ActionFilmRead) {
 		t.Fatalf("expected film.read to be a read action")
@@ -28,5 +28,11 @@ func TestPDPPolicy_DefaultMappings(t *testing.T) {
 	}
 	if hardened := policy.HardenedFields("spectator", "agent"); len(hardened) != 2 {
 		t.Fatalf("expected two hardened fields for spectator agent, got %d", len(hardened))
+	}
+	if got := policy.PolicyID(); got != "cinema-default" {
+		t.Fatalf("expected policy id cinema-default, got %q", got)
+	}
+	if got := policy.PolicyVersion(); got != "v1" {
+		t.Fatalf("expected policy version v1, got %q", got)
 	}
 }

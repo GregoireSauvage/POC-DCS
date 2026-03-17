@@ -9,8 +9,7 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -19,7 +18,7 @@ type Server struct {
 	logger           *slog.Logger
 	server           *nethttp.Server
 	mux              *nethttp.ServeMux
-	runtime          *runtime.Settings
+	runtime          *config.DCSRuntime
 	cache            *cache.Manager
 	enforcer         service.PolicyEnforcer
 	filmFlow         *service.FilmService

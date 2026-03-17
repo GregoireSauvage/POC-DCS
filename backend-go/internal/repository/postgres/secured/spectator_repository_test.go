@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
@@ -24,7 +24,7 @@ func TestSpectatorRepository_CreateReturnsSecureView(t *testing.T) {
 		t.Fatalf("EnforceSpectatorCreate: %v", err)
 	}
 
-	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), policyEnforcer, runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
 	view, err := repo.Create(withAccess("agent", service.ActionSpectatorCreate), &domain.Spectator{
 		TenantID:         "t1",
 		ID:               "550e8400-e29b-41d4-a716-446655440000",
@@ -56,7 +56,7 @@ func TestSpectatorRepository_SearchByExternalID_AdminDecrypts(t *testing.T) {
 		t.Fatalf("seed Create: %v", err)
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
 	views, err := repo.SearchByExternalID(withAccess("admin", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -80,7 +80,7 @@ func TestSpectatorRepository_SearchByExternalID_AgentMasksPII(t *testing.T) {
 		t.Fatalf("seed Create: %v", err)
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -107,7 +107,7 @@ func TestSpectatorRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 		t.Fatalf("seed Create: %v", err)
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, runtime.New("off", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("off", 1), testLogger())
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -121,7 +121,7 @@ func TestSpectatorRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 }
 
 func TestSpectatorRepository_MissingAccessContextDenied(t *testing.T) {
-	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), newSecuredPolicyEnforcer(t, "on"), runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), newSecuredPolicyEnforcer(t, "on"), config.NewDCSRuntime("on", 1), testLogger())
 
 	_, err := repo.SearchByExternalID(context.Background(), "t1", "TICKET-42")
 	if !errors.Is(err, service.ErrForbidden) {
@@ -137,7 +137,7 @@ func TestSpectatorRepository_AntiBypassDirectRepositoryCallStillEnforced(t *test
 		t.Fatalf("seed Create: %v", err)
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -160,7 +160,7 @@ func TestSpectatorRepository_SearchByExternalIDComputesLookupFromCleartext(t *te
 		},
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, runtime.New("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
 	_, err := repo.SearchByExternalID(withAccess("admin", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)

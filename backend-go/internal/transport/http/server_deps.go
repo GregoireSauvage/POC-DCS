@@ -5,8 +5,7 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
@@ -16,7 +15,7 @@ type Dependencies struct {
 	// Core infrastructure
 	Config  *config.Config
 	Logger  *slog.Logger
-	Runtime *runtime.Settings
+	Runtime *config.DCSRuntime
 	Cache   *cache.Manager
 
 	// DCS enforcement

@@ -1,3 +1,5 @@
+// Package runtime is a legacy package kept for compatibility during migration.
+// Deprecated: prefer github.com/neoweyss/poc-dcs/backend-go/internal/config.DCSRuntime in new code.
 package runtime
 
 import (
@@ -6,9 +8,17 @@ import (
 )
 
 type Settings struct {
+	source     runtimeSource
 	mu         sync.RWMutex
 	dcsMode    string
 	cacheLevel int
+}
+
+type runtimeSource interface {
+	Set(mode *string, cacheLevel *int)
+	Mode() string
+	CacheLevel() int
+	DcsEnabled() bool
 }
 
 func New(defaultMode string, defaultCacheLevel int) *Settings {
@@ -25,7 +35,18 @@ func New(defaultMode string, defaultCacheLevel int) *Settings {
 	}
 }
 
+func Wrap(source runtimeSource) *Settings {
+	if source == nil {
+		return New("on", 0)
+	}
+	return &Settings{source: source}
+}
+
 func (s *Settings) Set(mode *string, cacheLevel *int) {
+	if s.source != nil {
+		s.source.Set(mode, cacheLevel)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -46,18 +67,27 @@ func (s *Settings) Set(mode *string, cacheLevel *int) {
 }
 
 func (s *Settings) Mode() string {
+	if s.source != nil {
+		return s.source.Mode()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.dcsMode
 }
 
 func (s *Settings) CacheLevel() int {
+	if s.source != nil {
+		return s.source.CacheLevel()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cacheLevel
 }
 
 func (s *Settings) DcsEnabled() bool {
+	if s.source != nil {
+		return s.source.DcsEnabled()
+	}
 	mode := s.Mode()
 	return mode != "off" && mode != "false" && mode != "0" && mode != "no"
 }

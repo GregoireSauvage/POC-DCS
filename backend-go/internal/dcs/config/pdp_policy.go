@@ -12,7 +12,25 @@ type PDPPolicy struct {
 }
 
 func NewPDPPolicy(cfg *PDPConfig) *PDPPolicy {
+	if cfg == nil {
+		defaults := Defaults()
+		cfg = &defaults.PDP
+	}
 	return &PDPPolicy{cfg: cfg}
+}
+
+func (p *PDPPolicy) PolicyID() string {
+	if p == nil || p.cfg == nil {
+		return ""
+	}
+	return p.cfg.PolicyID
+}
+
+func (p *PDPPolicy) PolicyVersion() string {
+	if p == nil || p.cfg == nil {
+		return ""
+	}
+	return p.cfg.PolicyVersion
 }
 
 func (p *PDPPolicy) DefaultClassification() service.Classification {

@@ -69,6 +69,8 @@ func (e *DcsEnforcer) EvaluateFilmCreate(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -86,6 +88,8 @@ func (e *DcsEnforcer) EvaluateFilmUpdateTime(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -120,6 +124,8 @@ func (e *DcsEnforcer) EvaluateAuditRead(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -147,6 +153,8 @@ func (e *DcsEnforcer) EvaluatePerfRead(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -172,6 +180,9 @@ func (e *DcsEnforcer) EnforceFilmRead(
 		FieldsDecrypted: result.Decrypted,
 		FieldsMasked:    result.Masked,
 		FieldsDenied:    result.Denied,
+		DecisionHash:    decision.Hash,
+		PolicyID:        decision.PolicyID,
+		PolicyVersion:   decision.PolicyVersion,
 	}, nil
 }
 
@@ -199,7 +210,12 @@ func (e *DcsEnforcer) EnforceFilmCreate(
 		return service.FilmCreateEncrypted{}, err
 	}
 	if !decision.Allow {
-		return service.FilmCreateEncrypted{}, service.ErrForbidden
+		return service.FilmCreateEncrypted{}, &service.ForbiddenError{
+			DecisionHash: decision.Hash,
+			Reason:       decision.Reason,
+			PolicyID:     decision.PolicyID,
+			PolicyVersion: decision.PolicyVersion,
+		}
 	}
 
 	stop := perf.Span(ctx, "kms_ms")

@@ -1,6 +1,8 @@
 package service
 
 type ClassificationPolicy interface {
+	PolicyID() string
+	PolicyVersion() string
 	DefaultClassification() Classification
 	IsReadAction(action Action) bool
 	IsWriteAction(action Action) bool

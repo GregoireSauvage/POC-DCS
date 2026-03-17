@@ -3,13 +3,13 @@ package authorization
 import (
 	"testing"
 
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	appconfig "github.com/neoweyss/poc-dcs/backend-go/internal/config"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
 )
 
 func buildTestPolicy() service.ClassificationPolicy {
-	cfg := dcsconfig.Defaults()
-	return dcsconfig.NewPDPPolicy(&cfg.PDP)
+	cfg := appconfig.DefaultDCSConfig()
+	return appconfig.NewClassificationPolicy(cfg)
 }
 
 func buildTestInput(action service.Action, role string, resourceType string, resourceTenant string, fields map[string]service.FieldMeta) service.PolicyInput {
@@ -69,7 +69,9 @@ func TestPDP_SpectatorAgentHardening(t *testing.T) {
 
 func TestDecisionHash_Deterministic(t *testing.T) {
 	decisionA := service.Decision{
-		Allow: true,
+		Allow:         true,
+		PolicyID:      "cinema-default",
+		PolicyVersion: "v1",
 		FieldActions: map[string]service.FieldAction{
 			"zzz": service.FieldActionDecrypt,
 			"aaa": service.FieldActionAllow,
@@ -77,7 +79,9 @@ func TestDecisionHash_Deterministic(t *testing.T) {
 		Reason: "read_allowed",
 	}
 	decisionB := service.Decision{
-		Allow: true,
+		Allow:         true,
+		PolicyID:      "cinema-default",
+		PolicyVersion: "v1",
 		FieldActions: map[string]service.FieldAction{
 			"aaa": service.FieldActionAllow,
 			"zzz": service.FieldActionDecrypt,
@@ -87,5 +91,33 @@ func TestDecisionHash_Deterministic(t *testing.T) {
 
 	if DecisionHash(decisionA) != DecisionHash(decisionB) {
 		t.Fatalf("expected deterministic decision hash")
+	}
+}
+
+func TestDecisionHash_ChangesWithPolicyVersion(t *testing.T) {
+	decisionA := service.Decision{
+		Allow:         true,
+		PolicyID:      "cinema-default",
+		PolicyVersion: "v1",
+		FieldActions: map[string]service.FieldAction{
+			"time_elapsed": service.FieldActionDecrypt,
+		},
+		Reason: "read_allowed",
+	}
+	decisionB := decisionA
+	decisionB.PolicyVersion = "v2"
+
+	if DecisionHash(decisionA) == DecisionHash(decisionB) {
+		t.Fatalf("expected policy version to affect decision hash")
+	}
+}
+
+func TestPDP_DecisionCarriesPolicyMetadata(t *testing.T) {
+	decision := NewPDP(buildTestPolicy()).Evaluate(buildTestInput(service.ActionFilmRead, "admin", "film", "t1", nil))
+	if decision.PolicyID != "cinema-default" {
+		t.Fatalf("expected policy_id to be propagated, got %q", decision.PolicyID)
+	}
+	if decision.PolicyVersion != "v1" {
+		t.Fatalf("expected policy_version to be propagated, got %q", decision.PolicyVersion)
 	}
 }

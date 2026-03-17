@@ -22,6 +22,8 @@ type ForbiddenError struct {
 	DecisionHash string
 	Reason       string
 	Details      map[string]interface{}
+	PolicyID     string
+	PolicyVersion string
 }
 
 func (e *ForbiddenError) Error() string {
@@ -50,6 +52,9 @@ type FilmReadView struct {
 	FieldsDecrypted []string
 	FieldsMasked    []string
 	FieldsDenied    []string
+	DecisionHash    string
+	PolicyID        string
+	PolicyVersion   string
 }
 
 type FilmRepository interface {
@@ -113,11 +118,15 @@ func (s *FilmService) Create(
 			var forbiddenErr *ForbiddenError
 			decisionHash := ""
 			details := map[string]interface{}(nil)
+			policyID := ""
+			policyVersion := ""
 			if errors.As(err, &forbiddenErr) {
 				decisionHash = forbiddenErr.DecisionHash
 				details = forbiddenErr.Details
+				policyID = forbiddenErr.PolicyID
+				policyVersion = forbiddenErr.PolicyVersion
 			}
-			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decisionHash, details, nil, nil, nil)
+			s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
 		}
 		return FilmOutput{}, pctx, err
 	}
@@ -135,7 +144,7 @@ func (s *FilmService) Create(
 			"new_time_elapsed": input.TimeElapsed,
 			"film_id":          created.Output.ID,
 		}
-		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.Output.ID, "allow", "", details,
+		s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", created.Output.ID, "allow", created.DecisionHash, created.PolicyID, created.PolicyVersion, details,
 			created.FieldsDecrypted, created.FieldsMasked, created.FieldsDenied)
 	}
 
@@ -180,7 +189,15 @@ func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx Requ
 
 	// Write audit log (graceful degradation if audit service is nil)
 	if s.audit != nil {
-		s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", "", "allow", "", nil,
+		policyID := ""
+		policyVersion := ""
+		decisionHash := ""
+		if len(films) > 0 {
+			policyID = films[0].PolicyID
+			policyVersion = films[0].PolicyVersion
+			decisionHash = films[0].DecisionHash
+		}
+		s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", "", "allow", decisionHash, policyID, policyVersion, nil,
 			mapKeys(decryptedFields), mapKeys(maskedFields), mapKeys(deniedFields))
 	}
 
@@ -209,7 +226,7 @@ func (s *FilmService) UpdateTime(
 	if !decision.Allow {
 		// Write audit log for denied update (before returning error)
 		if s.audit != nil {
-			s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", decision.DecisionHash, nil, nil, nil, nil)
+			s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
 		}
 		return FilmOutput{}, pctx, ErrForbidden
 	}
@@ -234,7 +251,7 @@ func (s *FilmService) UpdateTime(
 
 	// Write audit log for successful update
 	if s.audit != nil {
-		s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "allow", decision.DecisionHash, nil, nil, nil, nil)
+		s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "allow", decision.DecisionHash, decision.PolicyID, decision.PolicyVersion, nil, nil, nil, nil)
 	}
 
 	// Write perf log
@@ -297,6 +314,8 @@ func (s *FilmService) writeAuditLog(
 	resourceID string,
 	outcome string,
 	decisionHash string,
+	policyID string,
+	policyVersion string,
 	details map[string]interface{},
 	fieldsDecrypted []string,
 	fieldsMasked []string,
@@ -313,6 +332,8 @@ func (s *FilmService) writeAuditLog(
 		ResourceID:      resourceID,
 		Outcome:         outcome,
 		DecisionHash:    decisionHash,
+		PolicyID:        policyID,
+		PolicyVersion:   policyVersion,
 		Details:         details,
 		FieldsDecrypted: fieldsDecrypted,
 		FieldsMasked:    fieldsMasked,

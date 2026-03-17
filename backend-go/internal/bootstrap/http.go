@@ -6,15 +6,16 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
+	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/infra/spif"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
@@ -59,10 +60,11 @@ func BuildHTTPDependencies(
 
 // Infrastructure holds the core infrastructure components
 type Infrastructure struct {
-	Runtime             *runtime.Settings
-	Cache               *cache.Manager
+	Runtime             *config.DCSRuntime
+	Cache               *infracache.Manager
 	KMS                 enforcer.CryptoService
-	DCSConfig           *dcsconfig.DCSConfig
+	DCSConfig           *config.DCSConfig
+	PolicyProvider      spif.Provider
 	ClassificationStore pip.ClassificationStore
 }
 
@@ -97,110 +99,30 @@ type Services struct {
 	JWT       *auth.JWTService
 }
 
-type pdpDecisionCacheAdapter struct {
-	cache *cache.TTL[string, legacytypes.Decision]
-}
-
-func (a *pdpDecisionCacheAdapter) Get(key string) (service.Decision, bool) {
-	if a == nil || a.cache == nil {
-		return service.Decision{}, false
-	}
-	decision, ok := a.cache.Get(key)
-	if !ok {
-		return service.Decision{}, false
-	}
-	return service.Decision{
-		Allow:        decision.Allow,
-		FieldActions: bootstrapToServiceFieldActions(decision.FieldActions),
-		Reason:       decision.Reason,
-		Hash:         decision.Hash,
-	}, true
-}
-
-func (a *pdpDecisionCacheAdapter) Set(key string, value service.Decision) {
-	if a == nil || a.cache == nil {
-		return
-	}
-	a.cache.Set(key, legacytypes.Decision{
-		Allow:        value.Allow,
-		FieldActions: bootstrapToLegacyFieldActions(value.FieldActions),
-		Reason:       value.Reason,
-		Hash:         value.Hash,
-	}, 0)
-}
-
-func bootstrapToServiceFieldActions(actions map[string]legacytypes.FieldAction) map[string]service.FieldAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make(map[string]service.FieldAction, len(actions))
-	for field, action := range actions {
-		converted[field] = bootstrapToServiceFieldAction(action)
-	}
-	return converted
-}
-
-func bootstrapToServiceFieldAction(action legacytypes.FieldAction) service.FieldAction {
-	switch action {
-	case legacytypes.FieldActionAllow:
-		return service.FieldActionAllow
-	case legacytypes.FieldActionDecrypt:
-		return service.FieldActionDecrypt
-	case legacytypes.FieldActionMaskAfterDecrypt:
-		return service.FieldActionMaskAfterDecrypt
-	default:
-		return service.FieldActionDeny
-	}
-}
-
-func bootstrapToLegacyFieldActions(actions map[string]service.FieldAction) map[string]legacytypes.FieldAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make(map[string]legacytypes.FieldAction, len(actions))
-	for field, action := range actions {
-		converted[field] = bootstrapToLegacyFieldAction(action)
-	}
-	return converted
-}
-
-func bootstrapToLegacyFieldAction(action service.FieldAction) legacytypes.FieldAction {
-	switch action {
-	case service.FieldActionAllow:
-		return legacytypes.FieldActionAllow
-	case service.FieldActionDecrypt:
-		return legacytypes.FieldActionDecrypt
-	case service.FieldActionMaskAfterDecrypt:
-		return legacytypes.FieldActionMaskAfterDecrypt
-	default:
-		return legacytypes.FieldActionDeny
-	}
-}
-
 // setupInfrastructure constructs all infrastructure components
 func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.Pool) Infrastructure {
-	var dcsConfig *dcsconfig.DCSConfig
+	var dcsConfig *config.DCSConfig
 	if cfg.DCSConfigPath != "" {
-		loaded, err := dcsconfig.Load(cfg.DCSConfigPath)
+		loaded, err := config.LoadDCSConfig(cfg.DCSConfigPath)
 		if err != nil {
 			logger.Warn("failed to load DCS config, using defaults", "path", cfg.DCSConfigPath, "error", err)
-			dcsConfig = dcsconfig.Defaults()
+			dcsConfig = config.DefaultDCSConfig()
 		} else {
 			dcsConfig = loaded
 			logger.Info("loaded DCS config from file", "path", cfg.DCSConfigPath)
 		}
 	} else {
 		logger.Warn("DCS_CONFIG_PATH not set, using hardcoded defaults")
-		dcsConfig = dcsconfig.Defaults()
+		dcsConfig = config.DefaultDCSConfig()
 	}
 
-	rt := runtime.New(cfg.DCSMode, cfg.CacheLevel)
+	rt := config.NewDCSRuntime(cfg.DCSMode, cfg.CacheLevel)
 	logger.Info("runtime settings initialized",
 		slog.Bool("dcs_enabled", rt.DcsEnabled()),
 		slog.Int("cache_level", rt.CacheLevel()),
 	)
 
-	cm := cache.NewManager(rt, cache.Options{
+	cm := infracache.NewManager(rt, infracache.Options{
 		MaxEntries:        cfg.CacheMaxEntries,
 		ClassificationTTL: cfg.CacheTTLClassif,
 		PDPTTL:            cfg.CacheTTLPDP,
@@ -212,7 +134,7 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 	var kmsClient enforcer.CryptoService
 	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
 		logger.Info("using Vault Transit KMS")
-		vaultClient, err := kms.NewVaultTransitClient(
+		vaultClient, err := infrakms.NewVaultTransitClient(
 			cfg.VaultAddr,
 			cfg.VaultToken,
 			cfg.VaultTransitKey,
@@ -221,13 +143,13 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		)
 		if err != nil {
 			logger.Error("failed to create vault client, falling back to local KMS", slog.String("error", err.Error()))
-			kmsClient = kms.NewLocalClient()
+			kmsClient = infrakms.NewLocalClient()
 		} else {
 			kmsClient = vaultClient
 		}
 	} else {
 		logger.Warn("no Vault config provided, using local mock KMS (NOT SECURE)")
-		kmsClient = kms.NewLocalClient()
+		kmsClient = infrakms.NewLocalClient()
 	}
 
 	staticStore := &pip.StaticClassificationStore{
@@ -265,12 +187,22 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		KMS:                 kmsClient,
 		DCSConfig:           dcsConfig,
 		ClassificationStore: classificationStore,
+		PolicyProvider:      spif.NewStaticProvider(dcsConfig.Policy),
 	}
 }
 
 // setupDCS constructs the DCS pipeline
 func setupDCS(cfg *config.Config, logger *slog.Logger, infra Infrastructure) DCSComponents {
-	provider := pip.NewProvider(infra.Runtime, infra.Cache, infra.ClassificationStore, pip.Config{
+	legacyRT := legacyruntime.Wrap(infra.Runtime)
+	legacyCache := legacycache.NewManager(legacyRT, legacycache.Options{
+		MaxEntries:        cfg.CacheMaxEntries,
+		ClassificationTTL: cfg.CacheTTLClassif,
+		PDPTTL:            cfg.CacheTTLPDP,
+		KMSTTL:            cfg.CacheTTLKMS,
+		PepperTTL:         cfg.CacheTTLPepper,
+	})
+
+	provider := pip.NewProvider(legacyRT, legacyCache, infra.ClassificationStore, pip.Config{
 		Env:            cfg.Env,
 		Channel:        infra.DCSConfig.PIP.Channel,
 		Purpose:        infra.DCSConfig.PIP.Purpose,
@@ -279,13 +211,13 @@ func setupDCS(cfg *config.Config, logger *slog.Logger, infra Infrastructure) DCS
 	})
 	logger.Info("PIP provider initialized")
 
-	policy := dcsconfig.NewPDPPolicy(&infra.DCSConfig.PDP)
+	policy := config.NewClassificationPolicy(infra.DCSConfig)
 	pdpAuthorizer := serviceauth.NewPDP(policy)
 	baseAuthorizer := serviceauth.NewAuthorizer(infra.Runtime, pdpAuthorizer)
-	cachedAuthorizer := serviceauth.NewCachedAuthorizer(infra.Runtime, &pdpDecisionCacheAdapter{cache: infra.Cache.PDP}, baseAuthorizer)
+	cachedAuthorizer := serviceauth.NewCachedAuthorizer(infra.Runtime, policy, infra.Cache.PDP, baseAuthorizer)
 	logger.Info("authorization stack initialized")
 
-	filmApplier := pep.NewFilmApplier(infra.Runtime, infra.KMS)
+	filmApplier := pep.NewFilmApplier(legacyRT, infra.KMS)
 	spectatorApplier := pep.NewSpectatorApplier(infra.KMS)
 	logger.Info("PEP appliers initialized", slog.String("appliers", "Film, Spectator"))
 
@@ -335,7 +267,7 @@ func setupRepositories(logger *slog.Logger, db *postgres.Pool, kmsClient enforce
 }
 
 // setupServices initializes all business logic services
-func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, dcs DCSComponents, rt *runtime.Settings) Services {
+func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, dcs DCSComponents, rt *config.DCSRuntime) Services {
 	var services Services
 
 	if repos.Audit != nil {

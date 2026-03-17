@@ -47,12 +47,18 @@ type HallReadResult struct {
 	CurrentFilmID interface{} // UUID or masked string
 	FieldsMasked  []string
 	FieldsDenied  []string
+	DecisionHash  string
+	PolicyID      string
+	PolicyVersion string
 }
 
 type HallReadView struct {
 	Output       HallOutput
 	FieldsMasked []string
 	FieldsDenied []string
+	DecisionHash string
+	PolicyID     string
+	PolicyVersion string
 }
 
 // HallRepository defines hall data access operations

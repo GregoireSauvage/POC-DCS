@@ -100,6 +100,9 @@ func (r *FilmRepository) secureRecord(ctx context.Context, record service.FilmRe
 		FieldsDecrypted: result.FieldsDecrypted,
 		FieldsMasked:    result.FieldsMasked,
 		FieldsDenied:    result.FieldsDenied,
+		DecisionHash:    result.DecisionHash,
+		PolicyID:        result.PolicyID,
+		PolicyVersion:   result.PolicyVersion,
 	}
 
 	r.logTechnicalRead(access, record, view)

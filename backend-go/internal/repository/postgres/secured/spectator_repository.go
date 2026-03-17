@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
@@ -66,7 +65,7 @@ func (r *SpectatorRepository) SearchByExternalID(ctx context.Context, tenantID s
 	if err != nil {
 		return nil, err
 	}
-	lookup := kms.ComputeHMACLookup(pepper, kms.NormalizeExternalID(externalID))
+	lookup := service.ComputeHMACLookup(pepper, service.NormalizeExternalID(externalID))
 
 	stop := perf.Span(ctx, "db_ms")
 	spectators, err := r.raw.FindByExternalIDLookup(ctx, tenantID, lookup)
@@ -110,6 +109,9 @@ func (r *SpectatorRepository) secureSpectator(ctx context.Context, access servic
 		FieldsDecrypted: result.FieldsDecrypted,
 		FieldsMasked:    result.FieldsMasked,
 		FieldsDenied:    result.FieldsDenied,
+		DecisionHash:    result.DecisionHash,
+		PolicyID:        result.PolicyID,
+		PolicyVersion:   result.PolicyVersion,
 	}
 
 	r.logTechnicalRead(access, spectator, view)

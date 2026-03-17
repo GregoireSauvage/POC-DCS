@@ -32,12 +32,17 @@ type FilmReadResult struct {
 	FieldsDecrypted []string // Fields that were decrypted for audit logging
 	FieldsMasked    []string // Fields that were masked for audit logging
 	FieldsDenied    []string // Fields that were denied for audit logging
+	DecisionHash    string
+	PolicyID        string
+	PolicyVersion   string
 }
 
 type AuthorizationDecision struct {
 	Allow        bool
 	Reason       string
 	DecisionHash string // Hash of PDP decision for audit correlation
+	PolicyID     string
+	PolicyVersion string
 }
 
 type PolicyEnforcer interface {

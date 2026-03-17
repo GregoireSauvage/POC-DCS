@@ -1,4 +1,11 @@
 {
+  "policy": {
+    "policy_id": "cinema-default",
+    "policy_version": "v1",
+    "classification_order": ["PUBLIC", "INTERNAL", "SENSITIVE", "PII"],
+    "allowed_categories": [],
+    "markings": {}
+  },
   "pip": {
     "channel": "web",
     "purpose": "cinema_ops",

@@ -33,6 +33,8 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 	subjectRole := nullableString(log.SubjectRole)
 	resourceID := nullableUUID(log.ResourceID)
 	decisionHash := nullableString(log.DecisionHash)
+	policyID := nullableString(log.PolicyID)
+	policyVersion := nullableString(log.PolicyVersion)
 	if log.FieldsDecrypted == nil {
 		log.FieldsDecrypted = []string{}
 	}
@@ -60,16 +62,16 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 			ts, request_id, tenant_id,
 			subject_user_id, subject_role,
 			action, resource_type, resource_id,
-			outcome, decision_hash,
+			outcome, decision_hash, policy_id, policy_version,
 			fields_decrypted, fields_masked, fields_denied,
 			details
 		) VALUES (
 			$1, $2, $3,
 			$4, $5,
 			$6, $7, $8,
-			$9, $10,
-			$11, $12, $13,
-			$14
+			$9, $10, $11, $12,
+			$13, $14, $15,
+			$16
 		)
 		RETURNING id
 	`
@@ -85,6 +87,8 @@ func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) e
 		resourceID,
 		log.Outcome,
 		decisionHash,
+		policyID,
+		policyVersion,
 		log.FieldsDecrypted,
 		log.FieldsMasked,
 		log.FieldsDenied,
@@ -109,7 +113,7 @@ func (r *AuditLogRepository) List(ctx context.Context, tenantID string, limit in
 			id, ts, request_id, tenant_id,
 			subject_user_id, subject_role,
 			action, resource_type, resource_id,
-			outcome, decision_hash,
+			outcome, decision_hash, policy_id, policy_version,
 			fields_decrypted, fields_masked, fields_denied,
 			details
 		FROM audit_logs
@@ -148,6 +152,8 @@ func scanAuditLog(rows pgx.Rows) (*domain.AuditLog, error) {
 	var resourceID pgtype.UUID
 	var subjectRole *string
 	var decisionHash *string
+	var policyID *string
+	var policyVersion *string
 
 	err := rows.Scan(
 		&log.ID,
@@ -161,6 +167,8 @@ func scanAuditLog(rows pgx.Rows) (*domain.AuditLog, error) {
 		&resourceID,
 		&log.Outcome,
 		&decisionHash,
+		&policyID,
+		&policyVersion,
 		&log.FieldsDecrypted,
 		&log.FieldsMasked,
 		&log.FieldsDenied,
@@ -188,6 +196,12 @@ func scanAuditLog(rows pgx.Rows) (*domain.AuditLog, error) {
 	}
 	if decisionHash != nil {
 		log.DecisionHash = *decisionHash
+	}
+	if policyID != nil {
+		log.PolicyID = *policyID
+	}
+	if policyVersion != nil {
+		log.PolicyVersion = *policyVersion
 	}
 
 	// Unmarshal details JSON

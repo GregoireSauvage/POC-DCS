@@ -1,5 +1,3 @@
-// Package kms is a legacy compatibility shim.
-// Deprecated: use github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms.
 package kms
 
 import (
@@ -35,9 +33,6 @@ func (c *LocalClient) Decrypt(_ context.Context, ciphertext string) (string, err
 	return string(decoded), nil
 }
 
-// GetPepper returns a static pepper for local development
-// In production, this should retrieve from Vault KV
 func (c *LocalClient) GetPepper(_ context.Context, _ string) ([]byte, error) {
-	// Static pepper for local/dev mode (NOT SECURE - for development only)
 	return []byte("local-dev-pepper-not-secure"), nil
 }

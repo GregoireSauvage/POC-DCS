@@ -25,6 +25,8 @@ type AuditLog struct {
 	// Decision outcome
 	Outcome      string `json:"outcome"` // allow, deny, error
 	DecisionHash string `json:"decision_hash"`
+	PolicyID     string `json:"policy_id,omitempty"`
+	PolicyVersion string `json:"policy_version,omitempty"`
 
 	// Field-level access tracking
 	FieldsDecrypted []string `json:"fields_decrypted"`

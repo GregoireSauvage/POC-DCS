@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	dcsconfig "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/config"
+	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
+	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
+	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -241,15 +241,15 @@ func TestFilmRepository_DBMSSpansOnlyRawRepository(t *testing.T) {
 func newFilmPolicyEnforcer(t *testing.T, dcsMode string) service.PolicyEnforcer {
 	t.Helper()
 
-	rt := runtime.New(dcsMode, 1)
-	cm := cache.NewManager(rt, cache.Options{
+	rt := legacyruntime.New(dcsMode, 1)
+	cm := legacycache.NewManager(rt, legacycache.Options{
 		MaxEntries:        100,
 		ClassificationTTL: 60,
 		PDPTTL:            60,
 		KMSTTL:            60,
 		PepperTTL:         60,
 	})
-	kmsClient := kms.NewLocalClient()
+	kmsClient := infrakms.NewLocalClient()
 	classificationStore := &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]legacytypes.Classification{
 			"film": {
@@ -265,8 +265,8 @@ func newFilmPolicyEnforcer(t *testing.T, dcsMode string) service.PolicyEnforcer 
 		DeviceTrust:    1.0,
 		ClientIPHeader: "X-Forwarded-For",
 	})
-	cfg := dcsconfig.Defaults()
-	policy := dcsconfig.NewPDPPolicy(&cfg.PDP)
+	cfg := config.DefaultDCSConfig()
+	policy := config.NewClassificationPolicy(cfg)
 	authorizer := serviceauth.NewAuthorizer(rt, serviceauth.NewPDP(policy))
 	filmApplier := pep.NewFilmApplier(rt, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)

@@ -68,6 +68,9 @@ type SpectatorReadResult struct {
 	FieldsDecrypted []string
 	FieldsMasked    []string
 	FieldsDenied    []string
+	DecisionHash    string
+	PolicyID        string
+	PolicyVersion   string
 }
 
 type SpectatorReadView struct {
@@ -75,6 +78,9 @@ type SpectatorReadView struct {
 	FieldsDecrypted []string
 	FieldsMasked    []string
 	FieldsDenied    []string
+	DecisionHash    string
+	PolicyID        string
+	PolicyVersion   string
 }
 
 type SecureSpectatorRepository interface {

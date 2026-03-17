@@ -34,6 +34,8 @@ func (e *DcsEnforcer) EvaluateHallCreate(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -65,6 +67,8 @@ func (e *DcsEnforcer) EvaluateHallRead(
 		Allow:        decision.Allow,
 		Reason:       decision.Reason,
 		DecisionHash: decision.Hash,
+		PolicyID:     decision.PolicyID,
+		PolicyVersion: decision.PolicyVersion,
 	}, nil
 }
 
@@ -95,6 +99,9 @@ func (e *DcsEnforcer) EnforceHallRead(
 	result := service.HallReadResult{}
 	name := hall.Name
 	result.Name = &name
+	result.DecisionHash = decision.Hash
+	result.PolicyID = decision.PolicyID
+	result.PolicyVersion = decision.PolicyVersion
 
 	if decision.FieldActions["owner_user_id"] == service.FieldActionMaskAfterDecrypt {
 		result.OwnerUserID = pep.MaskUUID(hall.OwnerUserID)

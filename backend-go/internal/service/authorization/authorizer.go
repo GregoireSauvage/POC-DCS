@@ -29,6 +29,8 @@ func (a *PolicyAuthorizer) Authorize(ctx context.Context, input service.PolicyIn
 			Allow:        a.allowWithoutDCS(input.Access.Action, input.Access.Principal.Role),
 			FieldActions: map[string]service.FieldAction{},
 			Reason:       "dcs_off",
+			PolicyID:     a.pdp.policy.PolicyID(),
+			PolicyVersion: a.pdp.policy.PolicyVersion(),
 		}
 		decision.Hash = DecisionHash(decision)
 		return decision, nil

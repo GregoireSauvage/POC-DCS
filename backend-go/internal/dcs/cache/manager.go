@@ -1,3 +1,5 @@
+// Package cache is a legacy compatibility shim.
+// Deprecated: use github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache.
 package cache
 
 import (

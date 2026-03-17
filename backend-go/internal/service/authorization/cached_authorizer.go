@@ -17,13 +17,15 @@ type DecisionCache interface {
 
 type CachedAuthorizer struct {
 	runtime  service.RuntimeSettings
+	policy   service.ClassificationPolicy
 	delegate service.Authorizer
 	cache    DecisionCache
 }
 
-func NewCachedAuthorizer(runtime service.RuntimeSettings, cache DecisionCache, delegate service.Authorizer) *CachedAuthorizer {
+func NewCachedAuthorizer(runtime service.RuntimeSettings, policy service.ClassificationPolicy, cache DecisionCache, delegate service.Authorizer) *CachedAuthorizer {
 	return &CachedAuthorizer{
 		runtime:  runtime,
+		policy:   policy,
 		cache:    cache,
 		delegate: delegate,
 	}
@@ -37,7 +39,7 @@ func (a *CachedAuthorizer) Authorize(ctx context.Context, input service.PolicyIn
 		return a.delegate.Authorize(ctx, input)
 	}
 
-	cacheKey := decisionCacheKey(a.runtime.DcsEnabled(), input)
+	cacheKey := decisionCacheKey(a.runtime.DcsEnabled(), a.policy.PolicyID(), a.policy.PolicyVersion(), input)
 	if cached, ok := a.cache.Get(cacheKey); ok {
 		return cached, nil
 	}
@@ -59,7 +61,7 @@ func cacheableAction(action service.Action) bool {
 	}
 }
 
-func decisionCacheKey(dcsEnabled bool, input service.PolicyInput) string {
+func decisionCacheKey(dcsEnabled bool, policyID string, policyVersion string, input service.PolicyInput) string {
 	fields := make([]string, 0, len(input.Resource.Fields))
 	for key, value := range input.Resource.Fields {
 		fields = append(fields, key+":"+string(value.Classification))
@@ -70,15 +72,17 @@ func decisionCacheKey(dcsEnabled bool, input service.PolicyInput) string {
 	sort.Strings(labels)
 
 	payload := map[string]any{
-		"dcs":      dcsEnabled,
-		"action":   input.Access.Action,
-		"tenant":   input.Access.Principal.TenantID,
-		"role":     input.Access.Principal.Role,
-		"user":     input.Access.Principal.UserID,
-		"resource": input.Resource.Type,
-		"owner":    input.Resource.OwnerID,
-		"labels":   labels,
-		"fields":   fields,
+		"dcs":            dcsEnabled,
+		"policy_id":      policyID,
+		"policy_version": policyVersion,
+		"action":         input.Access.Action,
+		"tenant":         input.Access.Principal.TenantID,
+		"role":           input.Access.Principal.Role,
+		"user":           input.Access.Principal.UserID,
+		"resource":       input.Resource.Type,
+		"owner":          input.Resource.OwnerID,
+		"labels":         labels,
+		"fields":         fields,
 	}
 	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
