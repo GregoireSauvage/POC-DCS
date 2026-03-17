@@ -221,7 +221,7 @@ func (r *HallRepository) accessContext(ctx context.Context) (service.AccessConte
 	access, ok := service.AccessContextFromContext(ctx)
 	if !ok {
 		if r.logger != nil {
-			r.logger.Warn("missing access context for secured hall repository")
+			r.logger.Warn("missing access context for hall repository")
 		}
 		return service.AccessContext{}, &service.ForbiddenError{Reason: "missing_access_context"}
 	}
@@ -310,7 +310,7 @@ func (r *HallRepository) logTechnicalRead(access service.AccessContext, record s
 		return
 	}
 
-	r.logger.Debug("secured hall repository read enforced",
+	r.logger.Debug("hall repository read enforced",
 		slog.String("request_id", access.Request.RequestID),
 		slog.String("tenant_id", access.Principal.TenantID),
 		slog.String("user_id", access.Principal.UserID),

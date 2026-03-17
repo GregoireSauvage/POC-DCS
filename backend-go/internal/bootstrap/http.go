@@ -251,16 +251,16 @@ func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, 
 		logger.Warn("performance service disabled (no database)")
 	}
 
-	filmSecureRepo := securedrepo.NewFilmRepository(repos.Film, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
-	services.Film = service.NewFilmService(filmSecureRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
+	filmRepo := securedrepo.NewFilmRepository(repos.Film, logger.With(slog.String("component", "film_repository")), bindingDeps)
+	services.Film = service.NewFilmService(filmRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("film service initialized")
 
-	hallSecureRepo := securedrepo.NewHallRepository(repos.Hall, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	services.Hall = service.NewHallService(hallSecureRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
+	hallRepo := securedrepo.NewHallRepository(repos.Hall, logger.With(slog.String("component", "hall_repository")), bindingDeps)
+	services.Hall = service.NewHallService(hallRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("hall service initialized")
 
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(repos.Spectator, infra.Runtime, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	services.Spectator = service.NewSpectatorService(spectatorSecureRepo, repos.Hall, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
+	spectatorRepo := securedrepo.NewSpectatorRepository(repos.Spectator, infra.Runtime, logger.With(slog.String("component", "spectator_repository")), bindingDeps)
+	services.Spectator = service.NewSpectatorService(spectatorRepo, repos.Hall, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("spectator service initialized")
 
 	services.JWT = auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)

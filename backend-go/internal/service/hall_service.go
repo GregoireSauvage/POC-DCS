@@ -10,7 +10,7 @@ import (
 )
 
 type hallService struct {
-	secureRepo           SecureHallRepository
+	repo                 SecureHallRepository
 	authorizer           Authorizer
 	classificationReader ClassificationMetadataReader
 	audit                *AuditService
@@ -19,7 +19,7 @@ type hallService struct {
 }
 
 func NewHallService(
-	secureRepo SecureHallRepository,
+	repo SecureHallRepository,
 	authorizer Authorizer,
 	classificationReader ClassificationMetadataReader,
 	audit *AuditService,
@@ -27,7 +27,7 @@ func NewHallService(
 	runtime RuntimeSettings,
 ) HallService {
 	return &hallService{
-		secureRepo:           secureRepo,
+		repo:                 repo,
 		authorizer:           authorizer,
 		classificationReader: classificationReader,
 		audit:                audit,
@@ -45,7 +45,7 @@ func (s *hallService) List(
 	ctx, pctx := perf.NewContext(ctx)
 	ctx = EnsureAccessContext(ctx, principal, reqCtx, ActionHallRead)
 
-	candidates, err := s.secureRepo.ListCandidates(ctx, principal.TenantID)
+	candidates, err := s.repo.ListCandidates(ctx, principal.TenantID)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -92,7 +92,7 @@ func (s *hallService) List(
 			return nil, pctx, ErrForbidden
 		}
 
-		view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, decision)
+		view, err := s.repo.ApplyReadDecision(ctx, candidate, decision)
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
@@ -185,7 +185,7 @@ func (s *hallService) Create(
 		return HallOutput{}, pctx, ErrForbidden
 	}
 
-	candidate, err := s.secureRepo.Create(ctx, principal.TenantID, input, writeDecision)
+	candidate, err := s.repo.Create(ctx, principal.TenantID, input, writeDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -225,7 +225,7 @@ func (s *hallService) Create(
 		return HallOutput{}, pctx, ErrForbidden
 	}
 
-	view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
+	view, err := s.repo.ApplyReadDecision(ctx, candidate, readDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {

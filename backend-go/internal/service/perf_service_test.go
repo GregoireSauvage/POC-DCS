@@ -28,11 +28,11 @@ type mockPerfLogRepository struct {
 }
 
 type mockPerfAuthorizer struct {
-	decision      Decision
-	err           error
+	decision       Decision
+	err            error
 	authorizeCalls int
-	lastPrincipal *Principal
-	lastReqCtx    *RequestContext
+	lastPrincipal  *Principal
+	lastReqCtx     *RequestContext
 }
 
 func (m *mockPerfAuthorizer) Authorize(ctx context.Context, input PolicyInput) (Decision, error) {
@@ -93,11 +93,11 @@ func TestPerfService_List_Admin(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	// Use enforcer that allows access (DCS required - no fallback)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that allows access (DCS required - no fallback)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
@@ -163,11 +163,11 @@ func TestPerfService_Write_RepoError(t *testing.T) {
 
 func TestPerfService_List_NonAdmin(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	// Use enforcer that denies access (simulates PDP denying non-admin)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that denies access (simulates PDP denying non-admin)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "developer"}
 	reqCtx := RequestContext{}
@@ -183,11 +183,11 @@ func TestPerfService_List_NonAdmin(t *testing.T) {
 
 func TestPerfService_List_RepoError(t *testing.T) {
 	repo := &mockPerfLogRepository{listErr: errors.New("db error")}
-	// Use enforcer that allows (we want to test repo error, not enforcer denial)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that allows (we want to test repo error, not authorizer denial)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
@@ -207,11 +207,11 @@ func TestPerfService_Summary_Admin(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
-	// Use enforcer that allows access (DCS required - no fallback)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that allows access (DCS required - no fallback)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
@@ -242,11 +242,11 @@ func TestPerfService_Summary_Admin(t *testing.T) {
 
 func TestPerfService_Summary_NonAdmin(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	// Use enforcer that denies access (simulates PDP denying non-admin)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that denies access (simulates PDP denying non-admin)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "agent"}
 	reqCtx := RequestContext{}
@@ -262,11 +262,11 @@ func TestPerfService_Summary_NonAdmin(t *testing.T) {
 
 func TestPerfService_Summary_RepoError(t *testing.T) {
 	repo := &mockPerfLogRepository{summaryErr: errors.New("db error")}
-	// Use enforcer that allows (we want to test repo error, not enforcer denial)
-	enforcer := &mockPerfAuthorizer{
+	// Use authorizer that allows (we want to test repo error, not authorizer denial)
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
@@ -280,14 +280,14 @@ func TestPerfService_Summary_RepoError(t *testing.T) {
 	}
 }
 
-func TestPerfService_List_EnforcerAllows(t *testing.T) {
+func TestPerfService_List_AuthorizerAllows(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
@@ -299,65 +299,65 @@ func TestPerfService_List_EnforcerAllows(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("expected 1 log, got %d", len(logs))
 	}
-	if enforcer.authorizeCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
+	if authorizer.authorizeCalls != 1 {
+		t.Fatalf("expected authorizer called once, got %d", authorizer.authorizeCalls)
 	}
 	if repo.listCalls != 1 {
-		t.Fatalf("expected repo called once (enforcer allowed), got %d", repo.listCalls)
+		t.Fatalf("expected repo called once (authorizer allowed), got %d", repo.listCalls)
 	}
 }
 
-func TestPerfService_List_EnforcerDenies(t *testing.T) {
+func TestPerfService_List_AuthorizerDenies(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
 
 	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
+		t.Fatalf("expected ErrForbidden when authorizer denies, got %v", err)
 	}
-	if enforcer.authorizeCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
+	if authorizer.authorizeCalls != 1 {
+		t.Fatalf("expected authorizer called once, got %d", authorizer.authorizeCalls)
 	}
 	if repo.listCalls != 0 {
-		t.Fatalf("expected repo NOT called when enforcer denies, got %d calls", repo.listCalls)
+		t.Fatalf("expected repo NOT called when authorizer denies, got %d calls", repo.listCalls)
 	}
 }
 
-func TestPerfService_List_EnforcerError(t *testing.T) {
+func TestPerfService_List_AuthorizerError(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		err: errors.New("pdp unavailable"),
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
 	_, err := svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 	if err == nil {
-		t.Fatal("expected error from enforcer")
+		t.Fatal("expected error from authorizer")
 	}
 	if errors.Is(err, ErrForbidden) {
-		t.Fatalf("expected propagated enforcer error, got ErrForbidden")
+		t.Fatalf("expected propagated authorizer error, got ErrForbidden")
 	}
 	if repo.listCalls != 0 {
-		t.Fatalf("expected repo NOT called on enforcer error, got %d calls", repo.listCalls)
+		t.Fatalf("expected repo NOT called on authorizer error, got %d calls", repo.listCalls)
 	}
 }
 
-func TestPerfService_List_EnforcerNil_AdminFallback(t *testing.T) {
+func TestPerfService_List_AuthorizerNil_AdminFallback(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	svc := NewPerfService(repo, nil, "go") // nil enforcer
+	svc := NewPerfService(repo, nil, "go") // nil authorizer
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
@@ -371,9 +371,9 @@ func TestPerfService_List_EnforcerNil_AdminFallback(t *testing.T) {
 	}
 }
 
-func TestPerfService_List_EnforcerNil_NonAdminFallback(t *testing.T) {
+func TestPerfService_List_AuthorizerNil_NonAdminFallback(t *testing.T) {
 	repo := &mockPerfLogRepository{}
-	svc := NewPerfService(repo, nil, "go") // nil enforcer
+	svc := NewPerfService(repo, nil, "go") // nil authorizer
 
 	principal := Principal{TenantID: "t1", Role: "developer"}
 	reqCtx := RequestContext{}
@@ -387,39 +387,39 @@ func TestPerfService_List_EnforcerNil_NonAdminFallback(t *testing.T) {
 	}
 }
 
-func TestPerfService_List_EnforcerCalledBeforeRepo(t *testing.T) {
+func TestPerfService_List_AuthorizerCalledBeforeRepo(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		listLogs: []*domain.PerfLog{{Action: "film.read"}},
 	}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: false}, // Deny
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
 	_, _ = svc.List(context.Background(), principal, reqCtx, 50, nil, nil)
 
-	// Enforcer should be called first
-	if enforcer.authorizeCalls != 1 {
-		t.Fatalf("expected enforcer called, got %d", enforcer.authorizeCalls)
+	// Authorizer should be called first
+	if authorizer.authorizeCalls != 1 {
+		t.Fatalf("expected authorizer called, got %d", authorizer.authorizeCalls)
 	}
-	// Repo should NOT be called (enforcer denied)
+	// Repo should NOT be called (authorizer denied)
 	if repo.listCalls != 0 {
-		t.Fatalf("expected repo NOT called after enforcer deny, got %d calls", repo.listCalls)
+		t.Fatalf("expected repo NOT called after authorizer deny, got %d calls", repo.listCalls)
 	}
 }
 
-func TestPerfService_Summary_EnforcerAllows(t *testing.T) {
+func TestPerfService_Summary_AuthorizerAllows(t *testing.T) {
 	action := "film.read"
 	repo := &mockPerfLogRepository{
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: true},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
@@ -431,34 +431,34 @@ func TestPerfService_Summary_EnforcerAllows(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 summary row, got %d", len(rows))
 	}
-	if enforcer.authorizeCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
+	if authorizer.authorizeCalls != 1 {
+		t.Fatalf("expected authorizer called once, got %d", authorizer.authorizeCalls)
 	}
 	if repo.summaryCalls != 1 {
 		t.Fatalf("expected repo summary called once, got %d", repo.summaryCalls)
 	}
 }
 
-func TestPerfService_Summary_EnforcerDenies(t *testing.T) {
+func TestPerfService_Summary_AuthorizerDenies(t *testing.T) {
 	repo := &mockPerfLogRepository{
 		summaryRows: []*domain.PerfSummary{{Action: "film.read"}},
 	}
-	enforcer := &mockPerfAuthorizer{
+	authorizer := &mockPerfAuthorizer{
 		decision: Decision{Allow: false},
 	}
-	svc := NewPerfService(repo, enforcer, "go")
+	svc := NewPerfService(repo, authorizer, "go")
 
 	principal := Principal{TenantID: "t1", Role: "admin"}
 	reqCtx := RequestContext{}
 
 	_, err := svc.Summary(context.Background(), principal, reqCtx, nil, nil, false, nil)
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("expected ErrForbidden when enforcer denies, got %v", err)
+		t.Fatalf("expected ErrForbidden when authorizer denies, got %v", err)
 	}
-	if enforcer.authorizeCalls != 1 {
-		t.Fatalf("expected enforcer called once, got %d", enforcer.authorizeCalls)
+	if authorizer.authorizeCalls != 1 {
+		t.Fatalf("expected authorizer called once, got %d", authorizer.authorizeCalls)
 	}
 	if repo.summaryCalls != 0 {
-		t.Fatalf("expected repo NOT called when enforcer denies, got %d calls", repo.summaryCalls)
+		t.Fatalf("expected repo NOT called when authorizer denies, got %d calls", repo.summaryCalls)
 	}
 }

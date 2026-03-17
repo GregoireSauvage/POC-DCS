@@ -109,7 +109,7 @@ func TestHallRepository_Create_RequiresAllowDecisionAndReturnsCandidate(t *testi
 	}
 }
 
-func TestHallRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
+func TestHallRepository_DCSOffPreservesPassthroughBehavior(t *testing.T) {
 	repo := NewHallRepository(memory.NewHallRepository(nil), testLogger(), newTestBindingDeps(t))
 	candidate := service.HallReadCandidate{
 		Record: service.HallRecord{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},

@@ -46,7 +46,7 @@ func NewJWTService(secret, issuer, audience string, ttlMinutes int) *JWTService 
 }
 
 // GenerateToken creates a new JWT token for a user.
-// It accepts JWTSubject and legacy principal-like structs for compatibility.
+// It accepts JWTSubject and principal-like structs exposed by the backend tests.
 func (j *JWTService) GenerateToken(subject any) (string, error) {
 	normalized, err := normalizeSubject(subject)
 	if err != nil {

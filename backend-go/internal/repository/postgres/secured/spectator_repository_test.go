@@ -133,7 +133,7 @@ func TestSpectatorRepository_ApplyReadDecision_AgentMasksPII(t *testing.T) {
 	}
 }
 
-func TestSpectatorRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
+func TestSpectatorRepository_DCSOffPreservesPassthroughBehavior(t *testing.T) {
 	deps := newTestBindingDeps(t)
 	spectator := newBoundSpectator(t, deps, "550e8400-e29b-41d4-a716-446655440000", "TICKET-42")
 	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), config.NewDCSRuntime("off", 1), testLogger(), deps)

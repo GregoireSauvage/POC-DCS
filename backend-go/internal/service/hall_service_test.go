@@ -27,7 +27,7 @@ func TestHallService_List_AdminSeesAllFields(t *testing.T) {
 			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
 		},
 	}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		readResult: hallRuleResult{
 			Name:          stringPtr("Hall A"),
 			OwnerUserID:   "u-admin",
@@ -36,7 +36,7 @@ func TestHallService_List_AdminSeesAllFields(t *testing.T) {
 			FieldsDenied:  []string{},
 		},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-1"}
@@ -71,7 +71,7 @@ func TestHallService_List_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-owner-12345", CurrentFilmID: "film-uuid-67890"},
 		},
 	}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		readResult: hallRuleResult{
 			Name:          stringPtr("Hall A"),
 			OwnerUserID:   "u-ow…", // Masked
@@ -80,7 +80,7 @@ func TestHallService_List_DeveloperSeesMaskedINTERNAL(t *testing.T) {
 			FieldsDenied:  []string{},
 		},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-dev", Role: "developer"}
 	reqCtx := RequestContext{RequestID: "req-2"}
@@ -112,7 +112,7 @@ func TestHallService_List_AgentSeesINTERNAL(t *testing.T) {
 			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-owner", CurrentFilmID: "film-1"},
 		},
 	}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		readResult: hallRuleResult{
 			Name:          stringPtr("Hall A"),
 			OwnerUserID:   "u-owner",
@@ -121,7 +121,7 @@ func TestHallService_List_AgentSeesINTERNAL(t *testing.T) {
 			FieldsDenied:  []string{},
 		},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-agent", Role: "agent"}
 	reqCtx := RequestContext{}
@@ -140,8 +140,8 @@ func TestHallService_List_AgentSeesINTERNAL(t *testing.T) {
 // Test 4: Empty halls returns empty array
 func TestHallService_List_EmptyHalls(t *testing.T) {
 	repo := &fakeHallRepo{halls: []HallRecord{}}
-	enforcer := &fakeHallRules{}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	rules := &fakeHallRules{}
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	halls, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
 	if err != nil {
@@ -164,18 +164,18 @@ func TestHallService_List_RepoError(t *testing.T) {
 	}
 }
 
-// Test 6: Enforcer error propagates
-func TestHallService_List_EnforcerError(t *testing.T) {
+// Test 6: Read-rule error propagates
+func TestHallService_List_ReadRuleError(t *testing.T) {
 	repo := &fakeHallRepo{
 		halls: []HallRecord{{TenantID: "t1", ID: "hall-1", Name: "Hall A"}},
 	}
-	enforcerErr := errors.New("pep failure")
-	enforcer := &fakeHallRules{readErr: enforcerErr}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	ruleErr := errors.New("pep failure")
+	rules := &fakeHallRules{readErr: ruleErr}
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
-	if !errors.Is(err, enforcerErr) {
-		t.Errorf("expected enforcer error, got %v", err)
+	if !errors.Is(err, ruleErr) {
+		t.Errorf("expected read rule error, got %v", err)
 	}
 }
 
@@ -187,10 +187,10 @@ func TestHallService_List_SpectatorCountComputed(t *testing.T) {
 		},
 		spectatorCounts: map[string]int{"hall-1": 42},
 	}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		readResult: hallRuleResult{Name: stringPtr("Hall A"), OwnerUserID: "u1", CurrentFilmID: "f1"},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	halls, _, err := svc.List(context.Background(), Principal{TenantID: "t1"}, RequestContext{})
 	if err != nil {
@@ -206,11 +206,11 @@ func TestHallService_List_SpectatorCountComputed(t *testing.T) {
 // Test 8: Admin creates hall successfully
 func TestHallService_Create_AdminAllowed(t *testing.T) {
 	repo := &fakeHallRepo{}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{Allow: true, Reason: "admin write"},
 		readResult:     hallRuleResult{Name: stringPtr("Hall A"), OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-create-1"}
@@ -231,11 +231,11 @@ func TestHallService_Create_AdminAllowed(t *testing.T) {
 // Test 9: Agent creates hall successfully
 func TestHallService_Create_AgentAllowed(t *testing.T) {
 	repo := &fakeHallRepo{}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{Allow: true, Reason: "agent write"},
 		readResult:     hallRuleResult{Name: stringPtr("Hall B"), OwnerUserID: "u-agent", CurrentFilmID: "film-2"},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-agent", Role: "agent"}
 	reqCtx := RequestContext{}
@@ -253,10 +253,10 @@ func TestHallService_Create_AgentAllowed(t *testing.T) {
 // Test 10: Developer forbidden to create hall
 func TestHallService_Create_DeveloperForbidden(t *testing.T) {
 	repo := &fakeHallRepo{}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{Allow: false, Reason: "developer not allowed"},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	principal := Principal{TenantID: "t1", UserID: "u-dev", Role: "developer"}
 	reqCtx := RequestContext{}
@@ -272,8 +272,8 @@ func TestHallService_Create_DeveloperForbidden(t *testing.T) {
 func TestHallService_Create_EvaluateError(t *testing.T) {
 	repo := &fakeHallRepo{}
 	evalErr := errors.New("pdp failure")
-	enforcer := &fakeHallRules{createErr: evalErr}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	rules := &fakeHallRules{createErr: evalErr}
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	input := HallCreateInput{Name: "Hall X", OwnerUserID: "u1", CurrentFilmID: "f1"}
 	_, _, err := svc.Create(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, input)
@@ -286,10 +286,10 @@ func TestHallService_Create_EvaluateError(t *testing.T) {
 func TestHallService_Create_RepoError(t *testing.T) {
 	repoErr := errors.New("db write failed")
 	repo := &fakeHallRepo{createErr: repoErr}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{Allow: true},
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	input := HallCreateInput{Name: "Hall Y", OwnerUserID: "u1", CurrentFilmID: "f1"}
 	_, _, err := svc.Create(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, input)
@@ -302,11 +302,11 @@ func TestHallService_Create_RepoError(t *testing.T) {
 func TestHallService_Create_ReadEnforcementError(t *testing.T) {
 	repo := &fakeHallRepo{}
 	readErr := errors.New("read enforcement failed")
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{Allow: true},
 		readErr:        readErr,
 	}
-	svc := newHallServiceForTest(repo, enforcer, nil, nil, nil)
+	svc := newHallServiceForTest(repo, rules, nil, nil, nil)
 
 	input := HallCreateInput{Name: "Hall Z", OwnerUserID: "u1", CurrentFilmID: "f1"}
 	_, _, err := svc.Create(context.Background(), Principal{TenantID: "t1", Role: "admin"}, RequestContext{}, input)
@@ -315,8 +315,8 @@ func TestHallService_Create_ReadEnforcementError(t *testing.T) {
 	}
 }
 
-func TestHallService_Create_SecureRepoWritesAudit_Allow(t *testing.T) {
-	secureRepo := &fakeSecureHallRepo{
+func TestHallService_Create_RepoWritesAudit_Allow(t *testing.T) {
+	repo := &fakeHallRepoStub{
 		createCandidate: HallReadCandidate{
 			Record:         HallRecord{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-agent", CurrentFilmID: "film-1"},
 			Resource:       Resource{Type: "hall", ID: "hall-1", TenantID: "t1"},
@@ -343,7 +343,7 @@ func TestHallService_Create_SecureRepoWritesAudit_Allow(t *testing.T) {
 	}
 	mockWriter := &mockAuditService{}
 	svc := NewHallService(
-		secureRepo,
+		repo,
 		authorizer,
 		nil,
 		NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
@@ -378,7 +378,7 @@ func TestHallService_Create_SecureRepoWritesAudit_Allow(t *testing.T) {
 
 func TestHallService_Create_WritesAudit_Deny(t *testing.T) {
 	repo := &fakeHallRepo{}
-	enforcer := &fakeHallRules{
+	rules := &fakeHallRules{
 		createDecision: Decision{
 			Allow:         false,
 			Reason:        "write_forbidden",
@@ -390,7 +390,7 @@ func TestHallService_Create_WritesAudit_Deny(t *testing.T) {
 	mockWriter := &mockAuditService{}
 	svc := newHallServiceForTest(
 		repo,
-		enforcer,
+		rules,
 		NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
 		nil,
 		nil,
@@ -413,8 +413,8 @@ func TestHallService_Create_WritesAudit_Deny(t *testing.T) {
 	}
 }
 
-func TestHallService_List_SecureRepoWritesAudit_Allow(t *testing.T) {
-	secureRepo := &fakeSecureHallRepo{
+func TestHallService_List_RepoWritesAudit_Allow(t *testing.T) {
+	repo := &fakeHallRepoStub{
 		listCandidates: []HallReadCandidate{
 			{
 				Record:         HallRecord{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-owner", CurrentFilmID: "film-1"},
@@ -442,7 +442,7 @@ func TestHallService_List_SecureRepoWritesAudit_Allow(t *testing.T) {
 	}
 	mockWriter := &mockAuditService{}
 	svc := &hallService{
-		secureRepo: secureRepo,
+		repo:       repo,
 		authorizer: authorizer,
 		audit:      NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
 	}
@@ -520,7 +520,7 @@ func (f *fakeHallRepo) FindByID(_ context.Context, tenantID string, hallID strin
 	return nil, nil
 }
 
-type fakeSecureHallRepo struct {
+type fakeHallRepoStub struct {
 	listCandidates  []HallReadCandidate
 	listErr         error
 	createCandidate HallReadCandidate
@@ -529,21 +529,21 @@ type fakeSecureHallRepo struct {
 	applyErr        error
 }
 
-func (f *fakeSecureHallRepo) ListCandidates(_ context.Context, _ string) ([]HallReadCandidate, error) {
+func (f *fakeHallRepoStub) ListCandidates(_ context.Context, _ string) ([]HallReadCandidate, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	return f.listCandidates, nil
 }
 
-func (f *fakeSecureHallRepo) Create(_ context.Context, _ string, _ HallCreateInput, _ Decision) (HallReadCandidate, error) {
+func (f *fakeHallRepoStub) Create(_ context.Context, _ string, _ HallCreateInput, _ Decision) (HallReadCandidate, error) {
 	if f.createErr != nil {
 		return HallReadCandidate{}, f.createErr
 	}
 	return f.createCandidate, nil
 }
 
-func (f *fakeSecureHallRepo) ApplyReadDecision(_ context.Context, _ HallReadCandidate, _ Decision) (HallReadView, error) {
+func (f *fakeHallRepoStub) ApplyReadDecision(_ context.Context, _ HallReadCandidate, _ Decision) (HallReadView, error) {
 	if f.applyErr != nil {
 		return HallReadView{}, f.applyErr
 	}
@@ -589,7 +589,7 @@ type fakeHallRules struct {
 
 func newHallServiceForTest(repo *fakeHallRepo, rules *fakeHallRules, audit *AuditService, perf PerfWriter, runtime RuntimeSettings) HallService {
 	return NewHallService(
-		&testHallSecureRepo{raw: repo, rules: rules},
+		&testHallRepo{raw: repo, rules: rules},
 		&testHallAuthorizer{rules: rules},
 		nil,
 		audit,
@@ -598,12 +598,12 @@ func newHallServiceForTest(repo *fakeHallRepo, rules *fakeHallRules, audit *Audi
 	)
 }
 
-type testHallSecureRepo struct {
-	raw      *fakeHallRepo
-	rules    *fakeHallRules
+type testHallRepo struct {
+	raw   *fakeHallRepo
+	rules *fakeHallRules
 }
 
-func (r *testHallSecureRepo) ListCandidates(_ context.Context, _ string) ([]HallReadCandidate, error) {
+func (r *testHallRepo) ListCandidates(_ context.Context, _ string) ([]HallReadCandidate, error) {
 	if r.raw.listErr != nil {
 		return nil, r.raw.listErr
 	}
@@ -622,7 +622,7 @@ func (r *testHallSecureRepo) ListCandidates(_ context.Context, _ string) ([]Hall
 	return candidates, nil
 }
 
-func (r *testHallSecureRepo) Create(_ context.Context, tenantID string, input HallCreateInput, decision Decision) (HallReadCandidate, error) {
+func (r *testHallRepo) Create(_ context.Context, tenantID string, input HallCreateInput, decision Decision) (HallReadCandidate, error) {
 	if !decision.Allow {
 		return HallReadCandidate{}, ErrForbidden
 	}
@@ -643,7 +643,7 @@ func (r *testHallSecureRepo) Create(_ context.Context, tenantID string, input Ha
 	return HallReadCandidate{Record: record, Resource: resource}, nil
 }
 
-func (r *testHallSecureRepo) ApplyReadDecision(_ context.Context, candidate HallReadCandidate, decision Decision) (HallReadView, error) {
+func (r *testHallRepo) ApplyReadDecision(_ context.Context, candidate HallReadCandidate, decision Decision) (HallReadView, error) {
 	if !decision.Allow {
 		return HallReadView{}, ErrForbidden
 	}

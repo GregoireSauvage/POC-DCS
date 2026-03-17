@@ -68,13 +68,13 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	if seedCT == "" {
 		seedCT = "120"
 	}
-	filmRepo := memory.NewFilmRepository([]service.FilmRecord{
+	filmStore := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT},
 	})
-	hallRepo := memory.NewHallRepository([]domain.Hall{
+	hallStore := memory.NewHallRepository([]domain.Hall{
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
 	})
-	spectatorRepo := memory.NewSpectatorRepository()
+	spectatorStore := memory.NewSpectatorRepository()
 	bindingStore := memory.NewBindingRepository()
 	labelIssuer := service.NewServerLabelIssuer(
 		config.NewClassificationPolicy(dcsConfig),
@@ -135,12 +135,12 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 
 	// No audit/perf services in tests by default (can be added via With methods)
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	filmService := service.NewFilmService(filmSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
-	hallService := service.NewHallService(hallSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
-	spectatorService := service.NewSpectatorService(spectatorSecureRepo, hallRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	filmRepo := securedrepo.NewFilmRepository(filmStore, logger.With(slog.String("component", "film_repository")), bindingDeps)
+	hallRepo := securedrepo.NewHallRepository(hallStore, logger.With(slog.String("component", "hall_repository")), bindingDeps)
+	spectatorRepo := securedrepo.NewSpectatorRepository(spectatorStore, rt, logger.With(slog.String("component", "spectator_repository")), bindingDeps)
+	filmService := service.NewFilmService(filmRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	hallService := service.NewHallService(hallRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	spectatorService := service.NewSpectatorService(spectatorRepo, hallStore, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
 
 	return &TestDependenciesBuilder{
 		deps: Dependencies{
@@ -217,7 +217,7 @@ func (b *TestDependenciesBuilder) WithRuntime(rt *config.DCSRuntime) *TestDepend
 	return b
 }
 
-func (b *TestDependenciesBuilder) NewSecureHallService(raw service.HallRepository) service.HallService {
+func (b *TestDependenciesBuilder) NewHallServiceFromRepo(raw service.HallRepository) service.HallService {
 	if raw != nil {
 		records, err := raw.ListByTenant(context.Background(), "t1")
 		if err == nil {
@@ -253,13 +253,13 @@ func (b *TestDependenciesBuilder) NewSecureHallService(raw service.HallRepositor
 			}
 		}
 	}
-	secureRepo := securedrepo.NewHallRepository(raw, b.logger.With(slog.String("component", "secured_hall_repository")), b.bindingDeps)
-	return service.NewHallService(secureRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
+	repo := securedrepo.NewHallRepository(raw, b.logger.With(slog.String("component", "hall_repository")), b.bindingDeps)
+	return service.NewHallService(repo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
 }
 
-func (b *TestDependenciesBuilder) NewSecureSpectatorService(raw service.SpectatorRepository, hallRepo service.HallRepository) *service.SpectatorService {
-	secureRepo := securedrepo.NewSpectatorRepository(raw, b.deps.Runtime, b.logger.With(slog.String("component", "secured_spectator_repository")), b.bindingDeps)
-	return service.NewSpectatorService(secureRepo, hallRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
+func (b *TestDependenciesBuilder) NewSpectatorServiceFromRepo(raw service.SpectatorRepository, hallRepo service.HallRepository) *service.SpectatorService {
+	repo := securedrepo.NewSpectatorRepository(raw, b.deps.Runtime, b.logger.With(slog.String("component", "spectator_repository")), b.bindingDeps)
+	return service.NewSpectatorService(repo, hallRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
 }
 
 // Build returns the constructed Dependencies struct

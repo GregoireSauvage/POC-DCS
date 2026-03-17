@@ -13,7 +13,7 @@ import (
 var (
 	ErrForbidden        = errors.New("forbidden")
 	ErrNotFound         = errors.New("not found")
-	ErrDCSNotConfigured = errors.New("DCS enforcer not configured - perf endpoints require DCS")
+	ErrDCSNotConfigured = errors.New("DCS authorizer not configured - protected endpoints require DCS")
 )
 
 // ForbiddenError wraps a forbidden error with additional context for audit logging

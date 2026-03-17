@@ -92,7 +92,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 			},
 		},
 	}
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{
 				Allow:        true,
@@ -116,7 +116,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -172,7 +172,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 			},
 		},
 	}
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{
 				Allow:        true,
@@ -196,7 +196,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -234,7 +234,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			// Developer is denied for write actions
 			return Decision{
@@ -248,7 +248,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -288,12 +288,12 @@ func TestSpectatorService_Create_HallNotFound_ReturnsNotFound(t *testing.T) {
 	hallRepo := &fakeHallRepoForSpectator{
 		halls: map[string]*domain.Hall{}, // Empty - no halls
 	}
-	enforcer := &fakeSpectatorRules{}
+	rules := &fakeSpectatorRules{}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -321,7 +321,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 		},
 	}
 	policyErr := errors.New("policy engine unavailable")
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{}, policyErr
 		},
@@ -330,7 +330,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -358,7 +358,7 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 		},
 	}
 	encryptErr := errors.New("vault encrypt failed")
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		encryptCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorCreatePayload) (spectatorEncryptedPayload, error) {
 			// Simulate encryption error
 			return spectatorEncryptedPayload{}, encryptErr
@@ -368,7 +368,7 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -398,7 +398,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{Allow: true, Hash: "hash"}, nil
 		},
@@ -407,7 +407,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -433,7 +433,7 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorRules{
+	rules := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{Allow: true, Hash: "hash"}, nil
 		},
@@ -453,7 +453,7 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 		cacheLevel: 0,
 	}
 
-	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, rules, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",

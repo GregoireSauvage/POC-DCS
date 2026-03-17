@@ -67,9 +67,9 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	})
 
 	// Repositories with DB
-	filmRepo := postgres.NewFilmRepository(db)
-	hallRepo := postgres.NewHallRepository(db)
-	spectatorRepo := postgres.NewSpectatorRepository(db)
+	filmStore := postgres.NewFilmRepository(db)
+	hallStore := postgres.NewHallRepository(db)
+	spectatorStore := postgres.NewSpectatorRepository(db)
 	auditRepo := postgres.NewAuditLogRepository(db)
 	perfRepo := postgres.NewPerfLogRepository(db)
 	userRepo := postgres.NewUserRepository(db)
@@ -92,12 +92,12 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		Crypto:               kmsClient,
 		ClassificationReader: classificationRepo,
 	}
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	filmService := service.NewFilmService(filmSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
-	hallService := service.NewHallService(hallSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
-	spectatorService := service.NewSpectatorService(spectatorSecureRepo, hallRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	filmRepo := securedrepo.NewFilmRepository(filmStore, logger.With(slog.String("component", "film_repository")), bindingDeps)
+	hallRepo := securedrepo.NewHallRepository(hallStore, logger.With(slog.String("component", "hall_repository")), bindingDeps)
+	spectatorRepo := securedrepo.NewSpectatorRepository(spectatorStore, rt, logger.With(slog.String("component", "spectator_repository")), bindingDeps)
+	filmService := service.NewFilmService(filmRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	hallService := service.NewHallService(hallRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	spectatorService := service.NewSpectatorService(spectatorRepo, hallStore, authorizer, classificationRepo, auditService, perfService, rt)
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 	authService := service.NewAuthService(userRepo, jwtService)
 
@@ -131,7 +131,7 @@ func TestIntegration_WithRealDatabase(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Build server with real database using legacy constructor
+	// Build server with real database using the canonical constructor chain
 	cfg := testConfig()
 	cfg.DatabaseURL = dbURL
 

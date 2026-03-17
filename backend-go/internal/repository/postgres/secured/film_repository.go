@@ -295,7 +295,7 @@ func (r *FilmRepository) accessContext(ctx context.Context) (service.AccessConte
 	access, ok := service.AccessContextFromContext(ctx)
 	if !ok {
 		if r.logger != nil {
-			r.logger.Warn("missing access context for secured film repository")
+			r.logger.Warn("missing access context for film repository")
 		}
 		return service.AccessContext{}, &service.ForbiddenError{Reason: "missing_access_context"}
 	}
@@ -427,7 +427,7 @@ func (r *FilmRepository) logTechnicalRead(access service.AccessContext, record s
 		return
 	}
 
-	r.logger.Debug("secured film repository read enforced",
+	r.logger.Debug("film repository read enforced",
 		slog.String("request_id", access.Request.RequestID),
 		slog.String("tenant_id", access.Principal.TenantID),
 		slog.String("user_id", access.Principal.UserID),

@@ -258,8 +258,8 @@ func TestIntegration_HallSpectatorWorkflow(t *testing.T) {
 	spectatorRepo := memory.NewSpectatorRepository()
 
 	server := newTestServerWithDeps(t, func(b *TestDependenciesBuilder) {
-		hallService := b.NewSecureHallService(hallRepo)
-		spectatorService := b.NewSecureSpectatorService(spectatorRepo, hallRepo)
+		hallService := b.NewHallServiceFromRepo(hallRepo)
+		spectatorService := b.NewSpectatorServiceFromRepo(spectatorRepo, hallRepo)
 		b.WithHallService(hallService)
 		b.WithSpectatorService(spectatorService)
 	})

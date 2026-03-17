@@ -157,7 +157,7 @@ func newSpectatorServiceForTest(
 	runtime RuntimeSettings,
 ) *SpectatorService {
 	return NewSpectatorService(
-		&testSpectatorSecureRepo{raw: spectatorRepo, rules: rules, runtime: runtime},
+		&testSpectatorRepo{raw: spectatorRepo, rules: rules, runtime: runtime},
 		hallRepo,
 		&testSpectatorAuthorizer{rules: rules},
 		nil,
@@ -167,13 +167,13 @@ func newSpectatorServiceForTest(
 	)
 }
 
-type testSpectatorSecureRepo struct {
-	raw      *fakeSpectatorRepo
-	rules    *fakeSpectatorRules
-	runtime  RuntimeSettings
+type testSpectatorRepo struct {
+	raw     *fakeSpectatorRepo
+	rules   *fakeSpectatorRules
+	runtime RuntimeSettings
 }
 
-func (r *testSpectatorSecureRepo) Create(ctx context.Context, tenantID string, input SpectatorCreateInput, decision Decision) (SpectatorReadCandidate, error) {
+func (r *testSpectatorRepo) Create(ctx context.Context, tenantID string, input SpectatorCreateInput, decision Decision) (SpectatorReadCandidate, error) {
 	if !decision.Allow {
 		return SpectatorReadCandidate{}, ErrForbidden
 	}
@@ -206,7 +206,7 @@ func (r *testSpectatorSecureRepo) Create(ctx context.Context, tenantID string, i
 	return SpectatorReadCandidate{Record: spectator, Resource: resource}, nil
 }
 
-func (r *testSpectatorSecureRepo) SearchCandidatesByExternalID(ctx context.Context, tenantID string, externalID string, decision Decision) ([]SpectatorReadCandidate, error) {
+func (r *testSpectatorRepo) SearchCandidatesByExternalID(ctx context.Context, tenantID string, externalID string, decision Decision) ([]SpectatorReadCandidate, error) {
 	if !decision.Allow {
 		return nil, ErrForbidden
 	}
@@ -230,7 +230,7 @@ func (r *testSpectatorSecureRepo) SearchCandidatesByExternalID(ctx context.Conte
 	return out, nil
 }
 
-func (r *testSpectatorSecureRepo) ApplyReadDecision(ctx context.Context, candidate SpectatorReadCandidate, decision Decision) (SpectatorReadView, error) {
+func (r *testSpectatorRepo) ApplyReadDecision(ctx context.Context, candidate SpectatorReadCandidate, decision Decision) (SpectatorReadView, error) {
 	if !decision.Allow {
 		return SpectatorReadView{}, ErrForbidden
 	}

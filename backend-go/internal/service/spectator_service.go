@@ -11,7 +11,7 @@ import (
 
 // SpectatorService provides spectator business operations
 type SpectatorService struct {
-	secureRepo           SecureSpectatorRepository
+	repo                 SecureSpectatorRepository
 	hallRepo             HallRepository
 	authorizer           Authorizer
 	classificationReader ClassificationMetadataReader
@@ -21,7 +21,7 @@ type SpectatorService struct {
 }
 
 func NewSpectatorService(
-	secureRepo SecureSpectatorRepository,
+	repo SecureSpectatorRepository,
 	hallRepo HallRepository,
 	authorizer Authorizer,
 	classificationReader ClassificationMetadataReader,
@@ -30,7 +30,7 @@ func NewSpectatorService(
 	runtime RuntimeSettings,
 ) *SpectatorService {
 	return &SpectatorService{
-		secureRepo:           secureRepo,
+		repo:                 repo,
 		hallRepo:             hallRepo,
 		authorizer:           authorizer,
 		classificationReader: classificationReader,
@@ -77,7 +77,7 @@ func (s *SpectatorService) Create(
 		return SpectatorOutput{}, pctx, ErrForbidden
 	}
 
-	candidate, err := s.secureRepo.Create(ctx, principal.TenantID, input, writeDecision)
+	candidate, err := s.repo.Create(ctx, principal.TenantID, input, writeDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -117,7 +117,7 @@ func (s *SpectatorService) Create(
 		return SpectatorOutput{}, pctx, ErrForbidden
 	}
 
-	view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
+	view, err := s.repo.ApplyReadDecision(ctx, candidate, readDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -184,7 +184,7 @@ func (s *SpectatorService) Search(
 		return nil, pctx, ErrForbidden
 	}
 
-	candidates, err := s.secureRepo.SearchCandidatesByExternalID(ctx, principal.TenantID, externalID, searchDecision)
+	candidates, err := s.repo.SearchCandidatesByExternalID(ctx, principal.TenantID, externalID, searchDecision)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			if s.audit != nil {
@@ -230,7 +230,7 @@ func (s *SpectatorService) Search(
 			return nil, pctx, ErrForbidden
 		}
 
-		view, err := s.secureRepo.ApplyReadDecision(ctx, candidate, readDecision)
+		view, err := s.repo.ApplyReadDecision(ctx, candidate, readDecision)
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
