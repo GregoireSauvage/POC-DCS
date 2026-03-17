@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -29,14 +30,26 @@ func unaryRequestIDInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func unaryAccessContextInterceptor(env string) grpc.UnaryServerInterceptor {
+func unaryAccessContextInterceptor(env string, logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req interface{},
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		ctx = withAccessContext(ctx, buildAccessContext(ctx, info.FullMethod, env))
+		access := buildAccessContext(ctx, info.FullMethod, env)
+		if logger != nil {
+			logger.Debug("grpc access context built",
+				slog.String("request_id", access.Request.RequestID),
+				slog.String("tenant_id", access.Principal.TenantID),
+				slog.String("user_id", access.Principal.UserID),
+				slog.String("role", access.Principal.Role),
+				slog.String("action", string(access.Action)),
+				slog.String("channel", access.Request.Channel),
+				slog.String("full_method", info.FullMethod),
+			)
+		}
+		ctx = withAccessContext(ctx, access)
 		return handler(ctx, req)
 	}
 }

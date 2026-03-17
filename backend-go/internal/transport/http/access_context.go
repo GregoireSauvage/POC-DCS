@@ -5,6 +5,7 @@ import (
 	nethttp "net/http"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	transportcore "github.com/neoweyss/poc-dcs/backend-go/internal/transport"
 )
 
 func withAccessContext(ctx context.Context, access service.AccessContext) context.Context {
@@ -23,6 +24,6 @@ func buildAccessContext(r *nethttp.Request, env string) service.AccessContext {
 	return service.AccessContext{
 		Principal: buildPrincipal(r),
 		Request:   buildRequestContext(r, env),
-		Action:    resolveHTTPAction(r.Method, r.URL.Path),
+		Action:    transportcore.ResolveHTTPAction(r.Method, r.URL.Path),
 	}
 }

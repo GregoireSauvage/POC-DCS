@@ -9,6 +9,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/observability/perf"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	transportcore "github.com/neoweyss/poc-dcs/backend-go/internal/transport"
 )
 
 type contextKey string
@@ -25,22 +26,16 @@ func principalFromRequest(r *nethttp.Request) service.Principal {
 
 func buildPrincipal(r *nethttp.Request) service.Principal {
 	if claims, ok := r.Context().Value(jwtClaimsKey).(*auth.JWTClaims); ok {
-		return service.Principal{
-			TenantID: claims.TenantID,
-			UserID:   claims.UserID,
-			Username: claims.Username,
-			Role:     claims.Role,
-			Scopes:   claims.Scopes, // Scopes are already []string, use directly
-		}
+		return transportcore.NormalizePrincipal(claims.TenantID, claims.UserID, claims.Username, claims.Role, claims.Scopes)
 	}
 
-	return service.Principal{
-		TenantID: readHeaderOrDefault(r, "X-Tenant-ID", "t1"),
-		UserID:   readHeaderOrDefault(r, "X-User-ID", "u-dev"),
-		Username: readHeaderOrDefault(r, "X-Username", "dev"),
-		Role:     readHeaderOrDefault(r, "X-Role", "developer"),
-		Scopes:   []string{"cinema"}, // Default scope for dev/testing
-	}
+	return transportcore.NormalizePrincipal(
+		r.Header.Get("X-Tenant-ID"),
+		r.Header.Get("X-User-ID"),
+		r.Header.Get("X-Username"),
+		r.Header.Get("X-Role"),
+		nil,
+	)
 }
 
 func requestContextFromRequest(r *nethttp.Request, env string) service.RequestContext {
@@ -52,14 +47,17 @@ func requestContextFromRequest(r *nethttp.Request, env string) service.RequestCo
 }
 
 func buildRequestContext(r *nethttp.Request, env string) service.RequestContext {
-	return service.RequestContext{
-		RequestID:   readHeaderOrDefault(r, "X-Request-ID", "http-no-request-id"),
-		ClientIP:    readHeaderOrDefault(r, "X-Real-IP", r.RemoteAddr),
-		Channel:     "web",
-		Purpose:     "cinema_ops",
-		DeviceTrust: 0.8,
-		Env:         env,
-	}
+	return transportcore.BuildRequestContext(
+		r.Header.Get("X-Request-ID"),
+		readHeaderOrDefault(r, "X-Real-IP", r.RemoteAddr),
+		env,
+		transportcore.RequestContextDefaults{
+			RequestIDFallback: "http-no-request-id",
+			Channel:           "web",
+			Purpose:           "cinema_ops",
+			DeviceTrust:       0.8,
+		},
+	)
 }
 
 func readHeaderOrDefault(r *nethttp.Request, key, fallback string) string {

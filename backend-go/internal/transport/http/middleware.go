@@ -11,7 +11,16 @@ import (
 
 func (s *Server) accessContextMiddleware(next nethttp.Handler) nethttp.Handler {
 	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		ctx := withAccessContext(r.Context(), buildAccessContext(r, s.cfg.Env))
+		access := buildAccessContext(r, s.cfg.Env)
+		s.logger.Debug("http access context built",
+			slog.String("request_id", access.Request.RequestID),
+			slog.String("tenant_id", access.Principal.TenantID),
+			slog.String("user_id", access.Principal.UserID),
+			slog.String("role", access.Principal.Role),
+			slog.String("action", string(access.Action)),
+			slog.String("channel", access.Request.Channel),
+		)
+		ctx := withAccessContext(r.Context(), access)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

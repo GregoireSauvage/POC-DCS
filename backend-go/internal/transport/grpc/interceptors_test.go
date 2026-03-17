@@ -2,6 +2,8 @@ package grpc
 
 import (
 	"context"
+	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
@@ -65,12 +67,35 @@ func TestUnaryAccessContextInterceptor_BuildsAccessContext(t *testing.T) {
 	}
 
 	requestID := unaryRequestIDInterceptor()
-	access := unaryAccessContextInterceptor("test")
+	access := unaryAccessContextInterceptor("test", slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 
 	_, err := requestID(ctx, nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 		return access(ctx, req, info, handler)
 	})
 	if err != nil {
 		t.Fatalf("unexpected interceptor error: %v", err)
+	}
+}
+
+func TestBuildAccessContext_DefaultsWithoutMetadata(t *testing.T) {
+	access := buildAccessContext(context.Background(), "/grpc.health.v1.Health/Check", "test")
+
+	if access.Principal.TenantID != "t1" {
+		t.Fatalf("expected default tenant id t1, got %q", access.Principal.TenantID)
+	}
+	if access.Principal.UserID != "u-dev" {
+		t.Fatalf("expected default user id u-dev, got %q", access.Principal.UserID)
+	}
+	if access.Principal.Role != "developer" {
+		t.Fatalf("expected default role developer, got %q", access.Principal.Role)
+	}
+	if access.Request.RequestID != "grpc-no-request-id" {
+		t.Fatalf("expected default request id grpc-no-request-id, got %q", access.Request.RequestID)
+	}
+	if access.Request.Channel != "grpc" {
+		t.Fatalf("expected channel grpc, got %q", access.Request.Channel)
+	}
+	if access.Action != service.ActionBootstrap {
+		t.Fatalf("expected bootstrap action, got %q", access.Action)
 	}
 }

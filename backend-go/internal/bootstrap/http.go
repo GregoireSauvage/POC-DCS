@@ -121,8 +121,11 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 
 	rt := config.NewDCSRuntime(cfg.DCSMode, cfg.CacheLevel)
 	logger.Info("runtime settings initialized",
-		slog.Bool("dcs_enabled", rt.DcsEnabled()),
+		slog.String("dcs_mode", cfg.DCSMode),
 		slog.Int("cache_level", rt.CacheLevel()),
+		slog.String("policy_id", dcsConfig.Policy.PolicyID),
+		slog.String("policy_version", dcsConfig.Policy.PolicyVersion),
+		slog.Bool("dcs_enabled", rt.DcsEnabled()),
 	)
 
 	cm := infracache.NewManager(rt, infracache.Options{

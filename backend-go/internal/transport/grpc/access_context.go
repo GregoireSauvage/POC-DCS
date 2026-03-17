@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/service"
+	transportcore "github.com/neoweyss/poc-dcs/backend-go/internal/transport"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -19,54 +20,30 @@ func buildAccessContext(ctx context.Context, fullMethod, env string) service.Acc
 	}
 
 	return service.AccessContext{
-		Principal: service.Principal{
-			TenantID: metadataValue(md, "x-tenant-id", "t1"),
-			UserID:   metadataValue(md, "x-user-id", "u-dev"),
-			Username: metadataValue(md, "x-username", "dev"),
-			Role:     metadataValue(md, "x-role", "developer"),
-			Scopes:   metadataScopes(md),
-		},
-		Request: service.RequestContext{
-			RequestID:   metadataValue(md, "x-request-id", "grpc-no-request-id"),
-			ClientIP:    metadataValue(md, "x-real-ip", ""),
-			Channel:     "grpc",
-			Purpose:     "cinema_ops",
-			DeviceTrust: 0.8,
-			Env:         env,
-		},
-		Action: resolveGRPCAction(fullMethod),
+		Principal: transportcore.NormalizePrincipal(
+			metadataValue(md, "x-tenant-id", ""),
+			metadataValue(md, "x-user-id", ""),
+			metadataValue(md, "x-username", ""),
+			metadataValue(md, "x-role", ""),
+			metadataScopes(md),
+		),
+		Request: transportcore.BuildRequestContext(
+			metadataValue(md, "x-request-id", ""),
+			metadataValue(md, "x-real-ip", ""),
+			env,
+			transportcore.RequestContextDefaults{
+				RequestIDFallback: "grpc-no-request-id",
+				Channel:           "grpc",
+				Purpose:           "cinema_ops",
+				DeviceTrust:       0.8,
+			},
+		),
+		Action: transportcore.ResolveGRPCAction(fullMethod),
 	}
 }
 
 func resolveGRPCAction(fullMethod string) service.Action {
-	method := strings.ToLower(strings.TrimSpace(fullMethod))
-
-	switch {
-	case method == "/grpc.health.v1.health/check", method == "/grpc.health.v1.health/watch":
-		return service.ActionBootstrap
-	case strings.Contains(method, "audit"):
-		return service.ActionAuditRead
-	case strings.Contains(method, "perf"):
-		return service.ActionPerfRead
-	case strings.Contains(method, "film") && strings.Contains(method, "update") && strings.Contains(method, "time"):
-		return service.ActionFilmUpdateTime
-	case strings.Contains(method, "film") && strings.Contains(method, "create"):
-		return service.ActionFilmCreate
-	case strings.Contains(method, "film") && (strings.Contains(method, "list") || strings.Contains(method, "get") || strings.Contains(method, "read")):
-		return service.ActionFilmRead
-	case strings.Contains(method, "hall") && strings.Contains(method, "create"):
-		return service.ActionHallCreate
-	case strings.Contains(method, "hall") && (strings.Contains(method, "list") || strings.Contains(method, "get") || strings.Contains(method, "read")):
-		return service.ActionHallRead
-	case strings.Contains(method, "spectator") && strings.Contains(method, "search"):
-		return service.ActionSearchSpectator
-	case strings.Contains(method, "spectator") && strings.Contains(method, "create"):
-		return service.ActionSpectatorCreate
-	case strings.Contains(method, "spectator") && (strings.Contains(method, "list") || strings.Contains(method, "get") || strings.Contains(method, "read")):
-		return service.ActionSpectatorRead
-	default:
-		return service.Action("")
-	}
+	return transportcore.ResolveGRPCAction(fullMethod)
 }
 
 func metadataValue(md metadata.MD, key, fallback string) string {

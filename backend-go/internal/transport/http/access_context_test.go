@@ -61,6 +61,28 @@ func TestBuildAccessContext_FallsBackToHeaders(t *testing.T) {
 	}
 }
 
+func TestBuildAccessContext_DefaultsWithoutJWTOrHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/films", nil)
+
+	access := buildAccessContext(req, "dev")
+
+	if access.Principal.TenantID != "t1" {
+		t.Fatalf("expected default tenant id t1, got %q", access.Principal.TenantID)
+	}
+	if access.Principal.UserID != "u-dev" {
+		t.Fatalf("expected default user id u-dev, got %q", access.Principal.UserID)
+	}
+	if access.Principal.Role != "developer" {
+		t.Fatalf("expected default role developer, got %q", access.Principal.Role)
+	}
+	if access.Request.RequestID != "http-no-request-id" {
+		t.Fatalf("expected default request id http-no-request-id, got %q", access.Request.RequestID)
+	}
+	if access.Request.Channel != "web" {
+		t.Fatalf("expected channel web, got %q", access.Request.Channel)
+	}
+}
+
 func TestAccessContextMiddleware_InsertsAccessContext(t *testing.T) {
 	server := &Server{
 		cfg:    &config.Config{Env: "test"},
