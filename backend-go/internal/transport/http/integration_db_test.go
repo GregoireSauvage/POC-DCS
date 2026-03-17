@@ -12,12 +12,6 @@ import (
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/auth"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/config"
-	legacycache "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/cache"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/enforcer"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pep"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
-	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
-	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
 	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
@@ -49,7 +43,7 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	})
 
 	// KMS client
-	var kmsClient enforcer.CryptoService
+	var kmsClient service.CryptoProvider
 	if cfg.VaultAddr != "" && cfg.VaultToken != "" {
 		vaultClient, err := infrakms.NewVaultTransitClient(
 			cfg.VaultAddr, cfg.VaultToken, cfg.VaultTransitKey, cm, logger,
@@ -63,30 +57,7 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		kmsClient = infrakms.NewLocalClient()
 	}
 
-	// Classification store with DB
-	staticStore := &pip.StaticClassificationStore{
-		ByResource: map[string]map[string]types.Classification{
-			"film":      {"title": types.ClassificationPublic, "time_elapsed": types.ClassificationSensitive},
-			"hall":      {"name": types.ClassificationPublic, "owner_user_id": types.ClassificationInternal, "current_film_id": types.ClassificationInternal},
-			"spectator": {"name": types.ClassificationPII, "age": types.ClassificationSensitive, "external_id": types.ClassificationPII},
-		},
-	}
 	classificationRepo := postgres.NewClassificationRepository(db)
-	classificationStore := pip.NewDBClassificationStore(classificationRepo, staticStore)
-
-	// DCS components
-	legacyRT := legacyruntime.Wrap(rt)
-	legacyCache := legacycache.NewManager(legacyRT, legacycache.Options{
-		MaxEntries:        cfg.CacheMaxEntries,
-		ClassificationTTL: cfg.CacheTTLClassif,
-		PDPTTL:            cfg.CacheTTLPDP,
-		KMSTTL:            cfg.CacheTTLKMS,
-		PepperTTL:         cfg.CacheTTLPepper,
-	})
-	provider := pip.NewProvider(legacyRT, legacyCache, classificationStore, pip.Config{
-		Env: cfg.Env, Channel: dcsCfg.PIP.Channel, Purpose: dcsCfg.PIP.Purpose,
-		DeviceTrust: dcsCfg.PIP.DeviceTrust, ClientIPHeader: dcsCfg.PIP.ClientIPHeader,
-	})
 	authorizer := newHTTPAuthorizer(rt, cm, dcsCfg)
 	bindingManager := infrabinding.NewManager(infrabinding.Config{
 		ProfileID:      dcsCfg.Binding.ProfileID,
@@ -94,9 +65,6 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		KeyID:          dcsCfg.Binding.KeyID,
 		Secret:         []byte(cfg.DCSBindingHMACKey),
 	})
-	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
-	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
-	_ = enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
 
 	// Repositories with DB
 	filmRepo := postgres.NewFilmRepository(db)
@@ -128,8 +96,8 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
 	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
 	filmService := service.NewFilmService(filmSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
-	hallService := service.NewHallServiceWithSecureRepo(hallSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
-	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorSecureRepo, hallRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	hallService := service.NewHallService(hallSecureRepo, authorizer, classificationRepo, auditService, perfService, rt)
+	spectatorService := service.NewSpectatorService(spectatorSecureRepo, hallRepo, authorizer, classificationRepo, auditService, perfService, rt)
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 	authService := service.NewAuthService(userRepo, jwtService)
 

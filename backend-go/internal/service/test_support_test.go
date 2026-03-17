@@ -46,6 +46,41 @@ type fakeRuntimeSettings struct {
 func (f fakeRuntimeSettings) DcsEnabled() bool { return f.dcsEnabled }
 func (f fakeRuntimeSettings) CacheLevel() int  { return f.cacheLevel }
 
+type spectatorCreatePayload struct {
+	HallID     string
+	Name       string
+	Age        int
+	ExternalID string
+}
+
+type spectatorEncryptedPayload struct {
+	HallID           string
+	NameCT           string
+	AgeCT            string
+	ExternalIDCT     string
+	ExternalIDLookup []byte
+}
+
+type spectatorRuleInput struct {
+	SpectatorID  string
+	HallID       string
+	NameCT       string
+	AgeCT        string
+	ExternalIDCT string
+}
+
+type spectatorRuleResult struct {
+	Name            interface{}
+	Age             interface{}
+	ExternalID      interface{}
+	FieldsDecrypted []string
+	FieldsMasked    []string
+	FieldsDenied    []string
+	DecisionHash    string
+	PolicyID        string
+	PolicyVersion   string
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
@@ -55,49 +90,49 @@ func contains(values []string, expected string) bool {
 	return false
 }
 
-type fakeSpectatorLegacyRules struct {
+type fakeSpectatorRules struct {
 	authorizeCreateFunc func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error)
 	authorizeSearchFunc func(ctx context.Context, principal Principal, reqCtx RequestContext) (Decision, error)
-	shapeReadFunc       func(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error)
-	encryptCreateFunc   func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error)
+	shapeReadFunc       func(ctx context.Context, principal Principal, reqCtx RequestContext, spectator spectatorRuleInput) (spectatorRuleResult, error)
+	encryptCreateFunc   func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorCreatePayload) (spectatorEncryptedPayload, error)
 	pepperFunc          func(ctx context.Context, path string) ([]byte, error)
 }
 
-func (f *fakeSpectatorLegacyRules) authorizeCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
+func (f *fakeSpectatorRules) authorizeCreate(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 	if f.authorizeCreateFunc != nil {
 		return f.authorizeCreateFunc(ctx, principal, reqCtx, ownerUserID)
 	}
 	return Decision{Allow: true, Reason: "test"}, nil
 }
 
-func (f *fakeSpectatorLegacyRules) authorizeSearch(ctx context.Context, principal Principal, reqCtx RequestContext) (Decision, error) {
+func (f *fakeSpectatorRules) authorizeSearch(ctx context.Context, principal Principal, reqCtx RequestContext) (Decision, error) {
 	if f.authorizeSearchFunc != nil {
 		return f.authorizeSearchFunc(ctx, principal, reqCtx)
 	}
 	return Decision{Allow: true, Reason: "test"}, nil
 }
 
-func (f *fakeSpectatorLegacyRules) shapeRead(ctx context.Context, principal Principal, reqCtx RequestContext, spectator SpectatorReadInput) (SpectatorReadResult, error) {
+func (f *fakeSpectatorRules) shapeRead(ctx context.Context, principal Principal, reqCtx RequestContext, spectator spectatorRuleInput) (spectatorRuleResult, error) {
 	if f.shapeReadFunc != nil {
 		return f.shapeReadFunc(ctx, principal, reqCtx, spectator)
 	}
-	return SpectatorReadResult{}, nil
+	return spectatorRuleResult{}, nil
 }
 
-func (f *fakeSpectatorLegacyRules) encryptCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
+func (f *fakeSpectatorRules) encryptCreate(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorCreatePayload) (spectatorEncryptedPayload, error) {
 	if f.encryptCreateFunc != nil {
 		return f.encryptCreateFunc(ctx, principal, reqCtx, input)
 	}
 	if f.authorizeCreateFunc != nil {
 		decision, err := f.authorizeCreateFunc(ctx, principal, reqCtx, "")
 		if err != nil {
-			return SpectatorCreateEncrypted{}, err
+			return spectatorEncryptedPayload{}, err
 		}
 		if !decision.Allow {
-			return SpectatorCreateEncrypted{}, ErrForbidden
+			return spectatorEncryptedPayload{}, ErrForbidden
 		}
 	}
-	return SpectatorCreateEncrypted{
+	return spectatorEncryptedPayload{
 		HallID:           input.HallID,
 		NameCT:           "vault:v1:encrypted",
 		AgeCT:            "vault:v1:encrypted",
@@ -106,25 +141,25 @@ func (f *fakeSpectatorLegacyRules) encryptCreate(ctx context.Context, principal 
 	}, nil
 }
 
-func (f *fakeSpectatorLegacyRules) pepper(ctx context.Context, path string) ([]byte, error) {
+func (f *fakeSpectatorRules) pepper(ctx context.Context, path string) ([]byte, error) {
 	if f.pepperFunc != nil {
 		return f.pepperFunc(ctx, path)
 	}
 	return []byte("test-pepper"), nil
 }
 
-func newSpectatorServiceFromLegacyRules(
+func newSpectatorServiceForTest(
 	spectatorRepo *fakeSpectatorRepo,
 	hallRepo *fakeHallRepoForSpectator,
-	rules *fakeSpectatorLegacyRules,
+	rules *fakeSpectatorRules,
 	audit AuditWriter,
 	perf PerfWriter,
 	runtime RuntimeSettings,
 ) *SpectatorService {
-	return NewSpectatorServiceWithSecureRepo(
-		&legacySpectatorSecureRepoForTest{raw: spectatorRepo, rules: rules, runtime: runtime},
+	return NewSpectatorService(
+		&testSpectatorSecureRepo{raw: spectatorRepo, rules: rules, runtime: runtime},
 		hallRepo,
-		&legacySpectatorAuthorizerForTest{rules: rules},
+		&testSpectatorAuthorizer{rules: rules},
 		nil,
 		audit,
 		perf,
@@ -132,18 +167,18 @@ func newSpectatorServiceFromLegacyRules(
 	)
 }
 
-type legacySpectatorSecureRepoForTest struct {
+type testSpectatorSecureRepo struct {
 	raw      *fakeSpectatorRepo
-	rules    *fakeSpectatorLegacyRules
+	rules    *fakeSpectatorRules
 	runtime  RuntimeSettings
 }
 
-func (r *legacySpectatorSecureRepoForTest) Create(ctx context.Context, tenantID string, input SpectatorCreateInput, decision Decision) (SpectatorReadCandidate, error) {
+func (r *testSpectatorSecureRepo) Create(ctx context.Context, tenantID string, input SpectatorCreateInput, decision Decision) (SpectatorReadCandidate, error) {
 	if !decision.Allow {
 		return SpectatorReadCandidate{}, ErrForbidden
 	}
 	access, _ := AccessContextFromContext(ctx)
-	encrypted, err := r.rules.encryptCreate(ctx, access.Principal, access.Request, SpectatorCreatePlain{
+	encrypted, err := r.rules.encryptCreate(ctx, access.Principal, access.Request, spectatorCreatePayload{
 		HallID:     input.HallID,
 		Name:       input.Name,
 		Age:        input.Age,
@@ -171,7 +206,7 @@ func (r *legacySpectatorSecureRepoForTest) Create(ctx context.Context, tenantID 
 	return SpectatorReadCandidate{Record: spectator, Resource: resource}, nil
 }
 
-func (r *legacySpectatorSecureRepoForTest) SearchCandidatesByExternalID(ctx context.Context, tenantID string, externalID string, decision Decision) ([]SpectatorReadCandidate, error) {
+func (r *testSpectatorSecureRepo) SearchCandidatesByExternalID(ctx context.Context, tenantID string, externalID string, decision Decision) ([]SpectatorReadCandidate, error) {
 	if !decision.Allow {
 		return nil, ErrForbidden
 	}
@@ -195,12 +230,12 @@ func (r *legacySpectatorSecureRepoForTest) SearchCandidatesByExternalID(ctx cont
 	return out, nil
 }
 
-func (r *legacySpectatorSecureRepoForTest) ApplyReadDecision(ctx context.Context, candidate SpectatorReadCandidate, decision Decision) (SpectatorReadView, error) {
+func (r *testSpectatorSecureRepo) ApplyReadDecision(ctx context.Context, candidate SpectatorReadCandidate, decision Decision) (SpectatorReadView, error) {
 	if !decision.Allow {
 		return SpectatorReadView{}, ErrForbidden
 	}
 	access, _ := AccessContextFromContext(ctx)
-	result, err := r.rules.shapeRead(ctx, access.Principal, access.Request, SpectatorReadInput{
+	result, err := r.rules.shapeRead(ctx, access.Principal, access.Request, spectatorRuleInput{
 		SpectatorID:  candidate.Record.ID,
 		HallID:       candidate.Record.HallID,
 		NameCT:       candidate.Record.NameCT,
@@ -231,11 +266,11 @@ func (r *legacySpectatorSecureRepoForTest) ApplyReadDecision(ctx context.Context
 	}, nil
 }
 
-type legacySpectatorAuthorizerForTest struct {
-	rules *fakeSpectatorLegacyRules
+type testSpectatorAuthorizer struct {
+	rules *fakeSpectatorRules
 }
 
-func (a *legacySpectatorAuthorizerForTest) Authorize(ctx context.Context, input PolicyInput) (Decision, error) {
+func (a *testSpectatorAuthorizer) Authorize(ctx context.Context, input PolicyInput) (Decision, error) {
 	access, _ := AccessContextFromContext(ctx)
 	switch input.Access.Action {
 	case ActionSpectatorCreate:

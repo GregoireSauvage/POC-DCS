@@ -32,26 +32,6 @@ type HallCreateInput struct {
 	CurrentFilmID string
 }
 
-// HallReadInput is the input for applying read policy
-type HallReadInput struct {
-	HallID        string
-	Name          string
-	OwnerUserID   string
-	CurrentFilmID string
-}
-
-// HallReadResult is the result after applying field actions
-type HallReadResult struct {
-	Name          *string     // nil if denied
-	OwnerUserID   interface{} // UUID or masked string
-	CurrentFilmID interface{} // UUID or masked string
-	FieldsMasked  []string
-	FieldsDenied  []string
-	DecisionHash  string
-	PolicyID      string
-	PolicyVersion string
-}
-
 type HallReadView struct {
 	Output       HallOutput
 	FieldsMasked []string

@@ -20,7 +20,7 @@ type SpectatorService struct {
 	runtime              RuntimeSettings
 }
 
-func NewSpectatorServiceWithSecureRepo(
+func NewSpectatorService(
 	secureRepo SecureSpectatorRepository,
 	hallRepo HallRepository,
 	authorizer Authorizer,

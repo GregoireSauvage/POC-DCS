@@ -92,7 +92,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 			},
 		},
 	}
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{
 				Allow:        true,
@@ -100,9 +100,9 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 				Hash: "hash-create",
 			}, nil
 		},
-		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorReadInput) (SpectatorReadResult, error) {
+		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorRuleInput) (spectatorRuleResult, error) {
 			// Admin sees all decrypted
-			return SpectatorReadResult{
+			return spectatorRuleResult{
 				Name:            "John Doe",
 				Age:             25,
 				ExternalID:      "ABC123",
@@ -116,7 +116,7 @@ func TestSpectatorService_Create_AdminAllowed_AllDecrypted(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -172,7 +172,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 			},
 		},
 	}
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{
 				Allow:        true,
@@ -180,9 +180,9 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 				Hash: "hash-agent",
 			}, nil
 		},
-		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorReadInput) (SpectatorReadResult, error) {
+		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorRuleInput) (spectatorRuleResult, error) {
 			// Agent sees age decrypted, PII (name, external_id) masked
-			return SpectatorReadResult{
+			return spectatorRuleResult{
 				Name:            "J***", // Masked
 				Age:             25,     // Decrypted
 				ExternalID:      "A***", // Masked
@@ -196,7 +196,7 @@ func TestSpectatorService_Create_AgentAllowed_PIIMasked(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -234,7 +234,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			// Developer is denied for write actions
 			return Decision{
@@ -248,7 +248,7 @@ func TestSpectatorService_Create_DeveloperDenied(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",
@@ -288,12 +288,12 @@ func TestSpectatorService_Create_HallNotFound_ReturnsNotFound(t *testing.T) {
 	hallRepo := &fakeHallRepoForSpectator{
 		halls: map[string]*domain.Hall{}, // Empty - no halls
 	}
-	enforcer := &fakeSpectatorLegacyRules{}
+	enforcer := &fakeSpectatorRules{}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -321,7 +321,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 		},
 	}
 	policyErr := errors.New("policy engine unavailable")
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{}, policyErr
 		},
@@ -330,7 +330,7 @@ func TestSpectatorService_Create_PolicyEvaluationError_ReturnsError(t *testing.T
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -358,17 +358,17 @@ func TestSpectatorService_Create_EncryptionError_ReturnsError(t *testing.T) {
 		},
 	}
 	encryptErr := errors.New("vault encrypt failed")
-	enforcer := &fakeSpectatorLegacyRules{
-		encryptCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorCreatePlain) (SpectatorCreateEncrypted, error) {
+	enforcer := &fakeSpectatorRules{
+		encryptCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorCreatePayload) (spectatorEncryptedPayload, error) {
 			// Simulate encryption error
-			return SpectatorCreateEncrypted{}, encryptErr
+			return spectatorEncryptedPayload{}, encryptErr
 		},
 	}
 	auditSvc := &mockAuditService{}
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -398,7 +398,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{Allow: true, Hash: "hash"}, nil
 		},
@@ -407,7 +407,7 @@ func TestSpectatorService_Create_RepositoryError_ReturnsError(t *testing.T) {
 	perfWriter := &fakePerfWriter{}
 	runtime := fakeRuntimeSettings{dcsEnabled: true, cacheLevel: 2}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{TenantID: "t1", UserID: "user-1", Role: "admin"}
 	reqCtx := RequestContext{RequestID: "req-123"}
@@ -433,12 +433,12 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 			"t1:hall-1": {TenantID: "t1", ID: "hall-1", OwnerUserID: "owner-123"},
 		},
 	}
-	enforcer := &fakeSpectatorLegacyRules{
+	enforcer := &fakeSpectatorRules{
 		authorizeCreateFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, ownerUserID string) (Decision, error) {
 			return Decision{Allow: true, Hash: "hash"}, nil
 		},
-		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input SpectatorReadInput) (SpectatorReadResult, error) {
-			return SpectatorReadResult{
+		shapeReadFunc: func(ctx context.Context, principal Principal, reqCtx RequestContext, input spectatorRuleInput) (spectatorRuleResult, error) {
+			return spectatorRuleResult{
 				Name:            "John Doe",
 				Age:             25,
 				ExternalID:      "ABC123",
@@ -453,7 +453,7 @@ func TestSpectatorService_Create_DCSOff_IDNotMasked(t *testing.T) {
 		cacheLevel: 0,
 	}
 
-	svc := newSpectatorServiceFromLegacyRules(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
+	svc := newSpectatorServiceForTest(spectatorRepo, hallRepo, enforcer, auditSvc, perfWriter, runtime)
 
 	principal := Principal{
 		TenantID: "t1",

@@ -139,8 +139,8 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
 	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
 	filmService := service.NewFilmService(filmSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
-	hallService := service.NewHallServiceWithSecureRepo(hallSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
-	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorSecureRepo, hallRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	hallService := service.NewHallService(hallSecureRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
+	spectatorService := service.NewSpectatorService(spectatorSecureRepo, hallRepo, authorizer, bindingDeps.ClassificationReader, nil, nil, rt)
 
 	return &TestDependenciesBuilder{
 		deps: Dependencies{
@@ -254,12 +254,12 @@ func (b *TestDependenciesBuilder) NewSecureHallService(raw service.HallRepositor
 		}
 	}
 	secureRepo := securedrepo.NewHallRepository(raw, b.logger.With(slog.String("component", "secured_hall_repository")), b.bindingDeps)
-	return service.NewHallServiceWithSecureRepo(secureRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
+	return service.NewHallService(secureRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
 }
 
 func (b *TestDependenciesBuilder) NewSecureSpectatorService(raw service.SpectatorRepository, hallRepo service.HallRepository) *service.SpectatorService {
 	secureRepo := securedrepo.NewSpectatorRepository(raw, b.deps.Runtime, b.logger.With(slog.String("component", "secured_spectator_repository")), b.bindingDeps)
-	return service.NewSpectatorServiceWithSecureRepo(secureRepo, hallRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
+	return service.NewSpectatorService(secureRepo, hallRepo, b.authorizer, b.classificationReader, nil, nil, b.deps.Runtime)
 }
 
 // Build returns the constructed Dependencies struct

@@ -23,25 +23,6 @@ type SpectatorCreateInput struct {
 	ExternalID string `json:"external_id"`
 }
 
-// SpectatorCreatePlain represents plaintext spectator data before encryption
-// Used as input to DCS enforcer for authorization + encryption
-type SpectatorCreatePlain struct {
-	HallID     string
-	Name       string
-	Age        int
-	ExternalID string
-}
-
-// SpectatorCreateEncrypted represents spectator data after encryption by DCS enforcer
-// Ready for database persistence, includes HMAC lookup for searchable encryption
-type SpectatorCreateEncrypted struct {
-	HallID           string
-	NameCT           string // Encrypted name
-	AgeCT            string // Encrypted age
-	ExternalIDCT     string // Encrypted external_id
-	ExternalIDLookup []byte // HMAC for searchable encryption
-}
-
 // SpectatorOutput is the API response structure for a spectator
 type SpectatorOutput struct {
 	ID         interface{} `json:"id"` // UUID or masked string ("550e…")
@@ -49,28 +30,6 @@ type SpectatorOutput struct {
 	Name       interface{} `json:"name"`        // string (decrypted), string (masked), or nil
 	Age        interface{} `json:"age"`         // int (decrypted), string (masked), or nil
 	ExternalID interface{} `json:"external_id"` // string (decrypted), string (masked), or nil
-}
-
-// SpectatorReadInput is the input for enforcing read policy
-type SpectatorReadInput struct {
-	SpectatorID  string
-	HallID       string
-	NameCT       string
-	AgeCT        string
-	ExternalIDCT string
-}
-
-// SpectatorReadResult is the result after applying read policy
-type SpectatorReadResult struct {
-	Name            interface{} // string or nil
-	Age             interface{} // int, string, or nil
-	ExternalID      interface{} // string or nil
-	FieldsDecrypted []string
-	FieldsMasked    []string
-	FieldsDenied    []string
-	DecisionHash    string
-	PolicyID        string
-	PolicyVersion   string
 }
 
 type SpectatorReadView struct {

@@ -256,11 +256,11 @@ func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, 
 	logger.Info("film service initialized")
 
 	hallSecureRepo := securedrepo.NewHallRepository(repos.Hall, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
-	services.Hall = service.NewHallServiceWithSecureRepo(hallSecureRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
+	services.Hall = service.NewHallService(hallSecureRepo, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("hall service initialized")
 
 	spectatorSecureRepo := securedrepo.NewSpectatorRepository(repos.Spectator, infra.Runtime, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
-	services.Spectator = service.NewSpectatorServiceWithSecureRepo(spectatorSecureRepo, repos.Hall, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
+	services.Spectator = service.NewSpectatorService(spectatorSecureRepo, repos.Hall, dcs.Authorizer, classificationReader, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("spectator service initialized")
 
 	services.JWT = auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)

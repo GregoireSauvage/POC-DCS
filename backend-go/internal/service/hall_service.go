@@ -18,7 +18,7 @@ type hallService struct {
 	runtime              RuntimeSettings
 }
 
-func NewHallServiceWithSecureRepo(
+func NewHallService(
 	secureRepo SecureHallRepository,
 	authorizer Authorizer,
 	classificationReader ClassificationMetadataReader,
