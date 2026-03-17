@@ -13,6 +13,7 @@ import (
 	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	legacytypes "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
 	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/infra/spif"
@@ -38,7 +39,7 @@ func BuildHTTPDependencies(
 	infra := setupInfrastructure(cfg, logger, db)
 	dcs := setupDCS(cfg, logger, infra)
 	repos := setupRepositories(logger, db, infra.KMS)
-	services := setupServices(cfg, logger, repos, dcs, infra.Runtime)
+	services := setupServices(cfg, logger, repos, dcs, infra)
 
 	logger.Info("HTTP server dependencies built successfully")
 
@@ -66,6 +67,7 @@ type Infrastructure struct {
 	DCSConfig           *config.DCSConfig
 	PolicyProvider      spif.Provider
 	ClassificationStore pip.ClassificationStore
+	BindingManager      *infrabinding.Manager
 }
 
 // DCSComponents holds all components of the DCS pipeline
@@ -86,6 +88,7 @@ type Repositories struct {
 	Audit          repository.AuditLogRepository
 	Perf           repository.PerfLogRepository
 	Classification pip.ClassificationRepository
+	Binding        service.BindingStore
 }
 
 // Services holds all business logic services
@@ -152,6 +155,18 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		kmsClient = infrakms.NewLocalClient()
 	}
 
+	if cfg.DCSBindingHMACKey == "" {
+		logger.Error("DCS_BINDING_HMAC_KEY is required for binding enforcement")
+		panic("missing DCS_BINDING_HMAC_KEY")
+	}
+
+	bindingManager := infrabinding.NewManager(infrabinding.Config{
+		ProfileID:      dcsConfig.Binding.ProfileID,
+		ProofAlgorithm: dcsConfig.Binding.ProofAlgorithm,
+		KeyID:          dcsConfig.Binding.KeyID,
+		Secret:         []byte(cfg.DCSBindingHMACKey),
+	})
+
 	staticStore := &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]legacytypes.Classification{
 			"film": {
@@ -188,6 +203,7 @@ func setupInfrastructure(cfg *config.Config, logger *slog.Logger, db *postgres.P
 		DCSConfig:           dcsConfig,
 		ClassificationStore: classificationStore,
 		PolicyProvider:      spif.NewStaticProvider(dcsConfig.Policy),
+		BindingManager:      bindingManager,
 	}
 }
 
@@ -246,7 +262,8 @@ func setupRepositories(logger *slog.Logger, db *postgres.Pool, kmsClient enforce
 		repos.Audit = postgres.NewAuditLogRepository(db)
 		repos.Perf = postgres.NewPerfLogRepository(db)
 		repos.Classification = postgres.NewClassificationRepository(db)
-		logger.Info("PostgreSQL repositories initialized", slog.Int("count", 7))
+		repos.Binding = postgres.NewBindingRepository(db)
+		logger.Info("PostgreSQL repositories initialized", slog.Int("count", 8))
 	} else {
 		logger.Warn("using in-memory repositories (data will be lost on restart)")
 		seedCT, _ := kmsClient.Encrypt(context.Background(), "120")
@@ -260,15 +277,28 @@ func setupRepositories(logger *slog.Logger, db *postgres.Pool, kmsClient enforce
 		repos.Audit = nil
 		repos.Perf = nil
 		repos.Classification = nil
-		logger.Info("in-memory repositories initialized", slog.Int("count", 3), slog.String("note", "User/Audit/Perf disabled"))
+		repos.Binding = memory.NewBindingRepository()
+		logger.Info("in-memory repositories initialized", slog.Int("count", 4), slog.String("note", "User/Audit/Perf disabled"))
 	}
 
 	return repos
 }
 
 // setupServices initializes all business logic services
-func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, dcs DCSComponents, rt *config.DCSRuntime) Services {
+func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, dcs DCSComponents, infra Infrastructure) Services {
 	var services Services
+	policy := config.NewClassificationPolicy(infra.DCSConfig)
+	classificationReader := service.ClassificationMetadataReader(repos.Classification)
+	if classificationReader == nil {
+		classificationReader = service.NewStaticClassificationReader(defaultClassificationMetadata())
+	}
+	labelIssuer := service.NewServerLabelIssuer(policy, classificationReader, defaultResourceMaxClassification())
+	bindingDeps := securedrepo.BindingDependencies{
+		Store:       repos.Binding,
+		Verifier:    infra.BindingManager,
+		Issuer:      infra.BindingManager,
+		LabelIssuer: labelIssuer,
+	}
 
 	if repos.Audit != nil {
 		services.Audit = service.NewAuditService(repos.Audit, dcs.Enforcer, logger.With(slog.String("component", "audit")))
@@ -284,16 +314,16 @@ func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, 
 		logger.Warn("performance service disabled (no database)")
 	}
 
-	filmSecureRepo := securedrepo.NewFilmRepository(repos.Film, dcs.Enforcer, logger.With(slog.String("component", "secured_film_repository")))
-	services.Film = service.NewFilmService(filmSecureRepo, dcs.Enforcer, services.Audit, services.Perf, rt)
+	filmSecureRepo := securedrepo.NewFilmRepository(repos.Film, dcs.Enforcer, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
+	services.Film = service.NewFilmService(filmSecureRepo, dcs.Enforcer, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("film service initialized")
 
-	hallSecureRepo := securedrepo.NewHallRepository(repos.Hall, dcs.Enforcer, logger.With(slog.String("component", "secured_hall_repository")))
-	services.Hall = service.NewHallServiceWithSecureRepo(repos.Hall, hallSecureRepo, dcs.Enforcer, services.Audit, services.Perf, rt)
+	hallSecureRepo := securedrepo.NewHallRepository(repos.Hall, dcs.Enforcer, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
+	services.Hall = service.NewHallServiceWithSecureRepo(repos.Hall, hallSecureRepo, dcs.Enforcer, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("hall service initialized")
 
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(repos.Spectator, dcs.Enforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
-	services.Spectator = service.NewSpectatorServiceWithSecureRepo(repos.Spectator, spectatorSecureRepo, repos.Hall, dcs.Enforcer, services.Audit, services.Perf, rt)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(repos.Spectator, dcs.Enforcer, infra.Runtime, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
+	services.Spectator = service.NewSpectatorServiceWithSecureRepo(repos.Spectator, spectatorSecureRepo, repos.Hall, dcs.Enforcer, services.Audit, services.Perf, infra.Runtime)
 	logger.Info("spectator service initialized")
 
 	services.JWT = auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
@@ -307,4 +337,31 @@ func setupServices(cfg *config.Config, logger *slog.Logger, repos Repositories, 
 	}
 
 	return services
+}
+
+func defaultClassificationMetadata() map[string][]domain.FieldClassification {
+	return map[string][]domain.FieldClassification{
+		"film": {
+			{ResourceType: "film", FieldName: "title", Classification: "PUBLIC"},
+			{ResourceType: "film", FieldName: "time_elapsed", Classification: "SENSITIVE"},
+		},
+		"hall": {
+			{ResourceType: "hall", FieldName: "name", Classification: "PUBLIC"},
+			{ResourceType: "hall", FieldName: "owner_user_id", Classification: "INTERNAL"},
+			{ResourceType: "hall", FieldName: "current_film_id", Classification: "INTERNAL"},
+		},
+		"spectator": {
+			{ResourceType: "spectator", FieldName: "name", Classification: "PII"},
+			{ResourceType: "spectator", FieldName: "age", Classification: "SENSITIVE"},
+			{ResourceType: "spectator", FieldName: "external_id", Classification: "PII"},
+		},
+	}
+}
+
+func defaultResourceMaxClassification() map[string]service.Classification {
+	return map[string]service.Classification{
+		"film":      service.ClassificationSensitive,
+		"hall":      service.ClassificationInternal,
+		"spectator": service.ClassificationPII,
+	}
 }

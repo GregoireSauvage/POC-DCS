@@ -18,6 +18,7 @@ import (
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/pip"
 	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
+	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
 	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/postgres"
@@ -87,6 +88,12 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 		DeviceTrust: dcsCfg.PIP.DeviceTrust, ClientIPHeader: dcsCfg.PIP.ClientIPHeader,
 	})
 	authorizer := newHTTPAuthorizer(rt, cm, dcsCfg)
+	bindingManager := infrabinding.NewManager(infrabinding.Config{
+		ProfileID:      dcsCfg.Binding.ProfileID,
+		ProofAlgorithm: dcsCfg.Binding.ProofAlgorithm,
+		KeyID:          dcsCfg.Binding.KeyID,
+		Secret:         []byte(cfg.DCSBindingHMACKey),
+	})
 	filmApplier := pep.NewFilmApplier(legacyRT, kmsClient)
 	spectatorApplier := pep.NewSpectatorApplier(kmsClient)
 	policyEnforcer := enforcer.New(provider, authorizer, filmApplier, spectatorApplier, kmsClient, cfg.VaultKVPepperPath)
@@ -98,13 +105,25 @@ func newServerWithDB(cfg *config.Config, logger *slog.Logger, db *postgres.Pool)
 	auditRepo := postgres.NewAuditLogRepository(db)
 	perfRepo := postgres.NewPerfLogRepository(db)
 	userRepo := postgres.NewUserRepository(db)
+	bindingRepo := postgres.NewBindingRepository(db)
 
 	// Services
 	auditService := service.NewAuditService(auditRepo, policyEnforcer, logger)
 	perfService := service.NewPerfService(perfRepo, policyEnforcer, cfg.PerfSource)
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, policyEnforcer, logger.With(slog.String("component", "secured_film_repository")))
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, policyEnforcer, logger.With(slog.String("component", "secured_hall_repository")))
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, policyEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
+	labelIssuer := service.NewServerLabelIssuer(
+		config.NewClassificationPolicy(dcsCfg),
+		classificationRepo,
+		map[string]service.Classification{"film": service.ClassificationSensitive, "hall": service.ClassificationInternal, "spectator": service.ClassificationPII},
+	)
+	bindingDeps := securedrepo.BindingDependencies{
+		Store:       bindingRepo,
+		Verifier:    bindingManager,
+		Issuer:      bindingManager,
+		LabelIssuer: labelIssuer,
+	}
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, policyEnforcer, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, policyEnforcer, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, policyEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
 	filmService := service.NewFilmService(filmSecureRepo, policyEnforcer, auditService, perfService, rt)
 	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, policyEnforcer, auditService, perfService, rt)
 	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, policyEnforcer, auditService, perfService, rt)

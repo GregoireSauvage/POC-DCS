@@ -22,6 +22,10 @@ func NewFilmRepository(pool *Pool) *FilmRepository {
 	return &FilmRepository{pool: pool}
 }
 
+func (r *FilmRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.Begin(ctx)
+}
+
 // ListByTenant returns all films for a given tenant
 func (r *FilmRepository) ListByTenant(ctx context.Context, tenantID string) ([]service.FilmRecord, error) {
 	query := `
@@ -76,6 +80,12 @@ func (r *FilmRepository) GetByID(ctx context.Context, tenantID, filmID string) (
 
 // Create inserts a new film and returns the created record
 func (r *FilmRepository) Create(ctx context.Context, tenantID, title, timeElapsedCT string) (service.FilmRecord, error) {
+	return r.CreateInTx(ctx, r.pool, tenantID, title, timeElapsedCT)
+}
+
+func (r *FilmRepository) CreateInTx(ctx context.Context, tx interface {
+	QueryRow(context.Context, string, ...interface{}) pgx.Row
+}, tenantID, title, timeElapsedCT string) (service.FilmRecord, error) {
 	query := `
 		INSERT INTO films (id, tenant_id, title, time_elapsed_ct, labels, created_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, '{}', NOW())
@@ -83,7 +93,7 @@ func (r *FilmRepository) Create(ctx context.Context, tenantID, title, timeElapse
 	`
 
 	var record service.FilmRecord
-	err := r.pool.QueryRow(ctx, query, tenantID, title, timeElapsedCT).Scan(
+	err := tx.QueryRow(ctx, query, tenantID, title, timeElapsedCT).Scan(
 		&record.ID,
 		&record.TenantID,
 		&record.Title,
@@ -126,6 +136,12 @@ func (r *FilmRepository) CreateFromDomain(ctx context.Context, film *domain.Film
 
 // UpdateTimeCiphertext updates the encrypted time_elapsed field
 func (r *FilmRepository) UpdateTimeCiphertext(ctx context.Context, tenantID, filmID, ciphertext string) (service.FilmRecord, error) {
+	return r.UpdateTimeCiphertextInTx(ctx, r.pool, tenantID, filmID, ciphertext)
+}
+
+func (r *FilmRepository) UpdateTimeCiphertextInTx(ctx context.Context, tx interface {
+	QueryRow(context.Context, string, ...interface{}) pgx.Row
+}, tenantID, filmID, ciphertext string) (service.FilmRecord, error) {
 	query := `
 		UPDATE films
 		SET time_elapsed_ct = $1
@@ -134,7 +150,7 @@ func (r *FilmRepository) UpdateTimeCiphertext(ctx context.Context, tenantID, fil
 	`
 
 	var record service.FilmRecord
-	err := r.pool.QueryRow(ctx, query, ciphertext, tenantID, filmID).Scan(
+	err := tx.QueryRow(ctx, query, ciphertext, tenantID, filmID).Scan(
 		&record.ID,
 		&record.TenantID,
 		&record.Title,

@@ -10,22 +10,37 @@ import (
 )
 
 type HallRepository struct {
-	raw      service.HallRepository
-	enforcer service.PolicyEnforcer
-	logger   *slog.Logger
+	raw             service.HallRepository
+	enforcer        service.PolicyEnforcer
+	logger          *slog.Logger
+	bindingStore    service.BindingStore
+	bindingVerifier service.BindingVerifier
+	bindingIssuer   service.BindingIssuer
+	labelIssuer     service.LabelIssuer
 }
 
-func NewHallRepository(raw service.HallRepository, enforcer service.PolicyEnforcer, logger *slog.Logger) *HallRepository {
+func NewHallRepository(raw service.HallRepository, enforcer service.PolicyEnforcer, logger *slog.Logger, deps ...BindingDependencies) *HallRepository {
+	var bindingDeps BindingDependencies
+	if len(deps) > 0 {
+		bindingDeps = deps[0]
+	}
 	return &HallRepository{
-		raw:      raw,
-		enforcer: enforcer,
-		logger:   logger,
+		raw:             raw,
+		enforcer:        enforcer,
+		logger:          logger,
+		bindingStore:    bindingDeps.Store,
+		bindingVerifier: bindingDeps.Verifier,
+		bindingIssuer:   bindingDeps.Issuer,
+		labelIssuer:     bindingDeps.LabelIssuer,
 	}
 }
 
 func (r *HallRepository) ListByTenant(ctx context.Context, tenantID string) ([]service.HallReadView, error) {
 	access, err := r.accessContext(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ensureBindingReadDependencies(BindingDependencies{Store: r.bindingStore, Verifier: r.bindingVerifier}); err != nil {
 		return nil, err
 	}
 
@@ -36,8 +51,16 @@ func (r *HallRepository) ListByTenant(ctx context.Context, tenantID string) ([]s
 		return nil, err
 	}
 
+	bindings, err := r.bindingStore.GetMany(ctx, tenantID, "hall", bindHallRecords(records))
+	if err != nil {
+		return nil, err
+	}
+
 	views := make([]service.HallReadView, 0, len(records))
 	for _, record := range records {
+		if err := r.verifyBinding(ctx, record, bindings); err != nil {
+			return nil, err
+		}
 		view, err := r.secureRecord(ctx, access, record)
 		if err != nil {
 			return nil, err
@@ -56,11 +79,34 @@ func (r *HallRepository) Create(ctx context.Context, hall *domain.Hall) (service
 	if err != nil {
 		return service.HallReadView{}, err
 	}
+	if err := ensureBindingWriteDependencies(BindingDependencies{
+		Store: r.bindingStore, Verifier: r.bindingVerifier, Issuer: r.bindingIssuer, LabelIssuer: r.labelIssuer,
+	}); err != nil {
+		return service.HallReadView{}, err
+	}
+
+	if txRepo, ok := r.raw.(hallTxRepository); ok {
+		if txStore, ok := r.bindingStore.(bindingTxStore); ok {
+			if err := r.createInTx(ctx, txRepo, txStore, access, hall); err != nil {
+				return service.HallReadView{}, err
+			}
+			view, err := r.secureRecord(ctx, access, service.HallRecord{TenantID: hall.TenantID, ID: hall.ID, Name: hall.Name, OwnerUserID: hall.OwnerUserID, CurrentFilmID: hall.CurrentFilmID})
+			if err != nil {
+				return service.HallReadView{}, err
+			}
+			view.Output.SpectatorCount = 0
+			return view, nil
+		}
+	}
 
 	stop := perf.Span(ctx, "db_ms")
 	err = r.raw.Create(ctx, hall)
 	stop()
 	if err != nil {
+		return service.HallReadView{}, err
+	}
+
+	if err := r.writeBinding(ctx, access, hall); err != nil {
 		return service.HallReadView{}, err
 	}
 
@@ -118,6 +164,83 @@ func (r *HallRepository) accessContext(ctx context.Context) (service.AccessConte
 		return service.AccessContext{}, &service.ForbiddenError{Reason: "missing_access_context"}
 	}
 	return access, nil
+}
+
+func (r *HallRepository) verifyBinding(ctx context.Context, record service.HallRecord, bindings map[string]service.ResourceBinding) error {
+	binding, ok := bindings[record.ID]
+	if !ok {
+		logBindingFailure(r.logger, "hall", record.ID, "binding_missing", map[string]interface{}{})
+		return bindingFailureError("binding_missing", nil, map[string]interface{}{"resource_type": "hall", "resource_id": record.ID})
+	}
+	if err := r.bindingVerifier.Verify(ctx, buildHallPayload(record), binding.Label, binding.Binding); err != nil {
+		reason := bindingReasonFromError(err)
+		details := map[string]interface{}{"resource_type": "hall", "resource_id": record.ID}
+		logBindingFailure(r.logger, "hall", record.ID, reason, details)
+		return bindingFailureError(reason, &binding, details)
+	}
+	return nil
+}
+
+func (r *HallRepository) writeBinding(ctx context.Context, access service.AccessContext, hall *domain.Hall) error {
+	label, err := r.labelIssuer.Issue(ctx, access, buildHallResource(hall))
+	if err != nil {
+		return err
+	}
+	bindingRecord, err := r.bindingIssuer.Create(ctx, buildHallPayload(service.HallRecord{
+		TenantID:      hall.TenantID,
+		ID:            hall.ID,
+		Name:          hall.Name,
+		OwnerUserID:   hall.OwnerUserID,
+		CurrentFilmID: hall.CurrentFilmID,
+	}), label)
+	if err != nil {
+		return err
+	}
+	return r.bindingStore.Upsert(ctx, service.ResourceBinding{
+		TenantID:     hall.TenantID,
+		ResourceType: "hall",
+		ResourceID:   hall.ID,
+		Label:        label,
+		Binding:      bindingRecord,
+	})
+}
+
+func (r *HallRepository) createInTx(ctx context.Context, txRepo hallTxRepository, txStore bindingTxStore, access service.AccessContext, hall *domain.Hall) error {
+	tx, err := txRepo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := txRepo.CreateInTx(ctx, tx, hall); err != nil {
+		return err
+	}
+
+	label, err := r.labelIssuer.Issue(ctx, access, buildHallResource(hall))
+	if err != nil {
+		return err
+	}
+	bindingRecord, err := r.bindingIssuer.Create(ctx, buildHallPayload(service.HallRecord{
+		TenantID:      hall.TenantID,
+		ID:            hall.ID,
+		Name:          hall.Name,
+		OwnerUserID:   hall.OwnerUserID,
+		CurrentFilmID: hall.CurrentFilmID,
+	}), label)
+	if err != nil {
+		return err
+	}
+	if err := txStore.UpsertInTx(ctx, tx, service.ResourceBinding{
+		TenantID:     hall.TenantID,
+		ResourceType: "hall",
+		ResourceID:   hall.ID,
+		Label:        label,
+		Binding:      bindingRecord,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *HallRepository) logTechnicalRead(access service.AccessContext, record service.HallRecord, view service.HallReadView) {

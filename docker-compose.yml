@@ -61,6 +61,7 @@ services:
       VAULT_KV_PEPPER_PATH: secret/dcs
       ENV: dev
       DCS_MODE: on
+      DCS_BINDING_HMAC_KEY: dev-binding-secret-change-me
       CACHE_LEVEL: 1
       CACHE_TTL_CLASSIF_SEC: 300
       CACHE_TTL_PDP_SEC: 60
@@ -99,6 +100,7 @@ services:
       # DCS Config
       ENV: dev
       DCS_MODE: on
+      DCS_BINDING_HMAC_KEY: dev-binding-secret-change-me
       CACHE_LEVEL: 1
 
       # Cache TTLs

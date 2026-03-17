@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -60,12 +61,66 @@ func (s *hallService) List(
 	if s.secureRepo != nil {
 		views, err := s.secureRepo.ListByTenant(ctx, principal.TenantID)
 		if err != nil {
+			if errors.Is(err, ErrForbidden) {
+				if s.audit != nil {
+					var forbiddenErr *ForbiddenError
+					decisionHash := ""
+					policyID := ""
+					policyVersion := ""
+					details := map[string]interface{}(nil)
+					if errors.As(err, &forbiddenErr) {
+						decisionHash = forbiddenErr.DecisionHash
+						policyID = forbiddenErr.PolicyID
+						policyVersion = forbiddenErr.PolicyVersion
+						details = forbiddenErr.Details
+					}
+					s.writeAuditLog(ctx, principal, reqCtx, "hall.read", "hall", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+				}
+				if s.perf != nil {
+					s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.read", "hall")
+				}
+				return nil, pctx, ErrForbidden
+			}
 			return nil, pctx, fmt.Errorf("failed to list halls: %w", err)
 		}
 
 		outputs := make([]HallOutput, 0, len(views))
+		masked := map[string]bool{}
+		denied := map[string]bool{}
+		decisionHash := ""
+		policyID := ""
+		policyVersion := ""
 		for _, view := range views {
 			outputs = append(outputs, view.Output)
+			if decisionHash == "" {
+				decisionHash = view.DecisionHash
+				policyID = view.PolicyID
+				policyVersion = view.PolicyVersion
+			}
+			for _, field := range view.FieldsMasked {
+				masked[field] = true
+			}
+			for _, field := range view.FieldsDenied {
+				denied[field] = true
+			}
+		}
+
+		if s.audit != nil {
+			s.writeAuditLog(
+				ctx,
+				principal,
+				reqCtx,
+				"hall.read",
+				"hall",
+				"",
+				"allow",
+				decisionHash,
+				policyID,
+				policyVersion,
+				nil,
+				mapKeys(masked),
+				mapKeys(denied),
+			)
 		}
 
 		if s.perf != nil {
@@ -85,6 +140,11 @@ func (s *hallService) List(
 
 	// 2. Apply field-level enforcement to each hall
 	outputs := make([]HallOutput, 0, len(records))
+	masked := map[string]bool{}
+	denied := map[string]bool{}
+	decisionHash := ""
+	policyID := ""
+	policyVersion := ""
 	for _, rec := range records {
 		// Enforce read policy
 		result, err := s.enforcer.EnforceHallRead(ctx, principal, reqCtx, HallReadInput{
@@ -95,6 +155,17 @@ func (s *hallService) List(
 		})
 		if err != nil {
 			return nil, pctx, fmt.Errorf("failed to enforce hall read: %w", err)
+		}
+		if decisionHash == "" {
+			decisionHash = result.DecisionHash
+			policyID = result.PolicyID
+			policyVersion = result.PolicyVersion
+		}
+		for _, field := range result.FieldsMasked {
+			masked[field] = true
+		}
+		for _, field := range result.FieldsDenied {
+			denied[field] = true
 		}
 
 		// 3. Compute spectator count
@@ -107,6 +178,24 @@ func (s *hallService) List(
 			CurrentFilmID:  result.CurrentFilmID,
 			SpectatorCount: spectatorCount,
 		})
+	}
+
+	if s.audit != nil {
+		s.writeAuditLog(
+			ctx,
+			principal,
+			reqCtx,
+			"hall.read",
+			"hall",
+			"",
+			"allow",
+			decisionHash,
+			policyID,
+			policyVersion,
+			nil,
+			mapKeys(masked),
+			mapKeys(denied),
+		)
 	}
 
 	// 4. Write perf log (after successful list)
@@ -133,6 +222,23 @@ func (s *hallService) Create(
 		return HallOutput{}, pctx, fmt.Errorf("failed to evaluate hall create: %w", err)
 	}
 	if !decision.Allow {
+		if s.audit != nil {
+			s.writeAuditLog(
+				ctx,
+				principal,
+				reqCtx,
+				"hall.create",
+				"hall",
+				"",
+				"deny",
+				decision.DecisionHash,
+				decision.PolicyID,
+				decision.PolicyVersion,
+				nil,
+				nil,
+				nil,
+			)
+		}
 		if s.perf != nil {
 			s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
 		}
@@ -152,7 +258,45 @@ func (s *hallService) Create(
 	if s.secureRepo != nil {
 		view, err := s.secureRepo.Create(ctx, hall)
 		if err != nil {
+			if errors.Is(err, ErrForbidden) {
+				if s.audit != nil {
+					var forbiddenErr *ForbiddenError
+					decisionHash := ""
+					policyID := ""
+					policyVersion := ""
+					details := map[string]interface{}(nil)
+					if errors.As(err, &forbiddenErr) {
+						decisionHash = forbiddenErr.DecisionHash
+						policyID = forbiddenErr.PolicyID
+						policyVersion = forbiddenErr.PolicyVersion
+						details = forbiddenErr.Details
+					}
+					s.writeAuditLog(ctx, principal, reqCtx, "hall.create", "hall", hallID, "deny", decisionHash, policyID, policyVersion, details, nil, nil)
+				}
+				if s.perf != nil {
+					s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
+				}
+				return HallOutput{}, pctx, ErrForbidden
+			}
 			return HallOutput{}, pctx, fmt.Errorf("failed to create hall: %w", err)
+		}
+
+		if s.audit != nil {
+			s.writeAuditLog(
+				ctx,
+				principal,
+				reqCtx,
+				"hall.create",
+				"hall",
+				hallID,
+				"allow",
+				view.DecisionHash,
+				view.PolicyID,
+				view.PolicyVersion,
+				nil,
+				view.FieldsMasked,
+				view.FieldsDenied,
+			)
 		}
 
 		if s.perf != nil {
@@ -189,12 +333,67 @@ func (s *hallService) Create(
 		SpectatorCount: 0, // New hall has no spectators
 	}
 
+	if s.audit != nil {
+		s.writeAuditLog(
+			ctx,
+			principal,
+			reqCtx,
+			"hall.create",
+			"hall",
+			hallID,
+			"allow",
+			result.DecisionHash,
+			result.PolicyID,
+			result.PolicyVersion,
+			nil,
+			result.FieldsMasked,
+			result.FieldsDenied,
+		)
+	}
+
 	// 5. Write perf log (after successful create)
 	if s.perf != nil {
 		s.writePerfLog(ctx, pctx, principal, reqCtx, "hall.create", "hall")
 	}
 
 	return output, pctx, nil
+}
+
+func (s *hallService) writeAuditLog(
+	ctx context.Context,
+	principal Principal,
+	reqCtx RequestContext,
+	action string,
+	resourceType string,
+	resourceID string,
+	outcome string,
+	decisionHash string,
+	policyID string,
+	policyVersion string,
+	details map[string]interface{},
+	fieldsMasked []string,
+	fieldsDenied []string,
+) {
+	if s.audit == nil {
+		return
+	}
+
+	_ = s.audit.WriteAudit(ctx, &domain.AuditLog{
+		RequestID:     reqCtx.RequestID,
+		TenantID:      principal.TenantID,
+		SubjectUserID: principal.UserID,
+		SubjectRole:   principal.Role,
+		Action:        action,
+		ResourceType:  resourceType,
+		ResourceID:    resourceID,
+		Outcome:       outcome,
+		DecisionHash:  decisionHash,
+		PolicyID:      policyID,
+		PolicyVersion: policyVersion,
+		Details:       details,
+		FieldsMasked:  fieldsMasked,
+		FieldsDenied:  fieldsDenied,
+	})
 }
 
 func (s *hallService) writePerfLog(

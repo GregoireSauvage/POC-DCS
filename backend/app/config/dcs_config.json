@@ -6,6 +6,11 @@
     "allowed_categories": [],
     "markings": {}
   },
+  "binding": {
+    "profile_id": "internal/bdo-hmac-v1",
+    "proof_algorithm": "hmac-sha256",
+    "key_id": "binding-key-v1"
+  },
   "pip": {
     "channel": "web",
     "purpose": "cinema_ops",

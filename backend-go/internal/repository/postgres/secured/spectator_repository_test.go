@@ -24,7 +24,7 @@ func TestSpectatorRepository_CreateReturnsSecureView(t *testing.T) {
 		t.Fatalf("EnforceSpectatorCreate: %v", err)
 	}
 
-	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
+	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), policyEnforcer, config.NewDCSRuntime("on", 1), testLogger(), newTestBindingDeps(t))
 	view, err := repo.Create(withAccess("agent", service.ActionSpectatorCreate), &domain.Spectator{
 		TenantID:         "t1",
 		ID:               "550e8400-e29b-41d4-a716-446655440000",
@@ -55,8 +55,10 @@ func TestSpectatorRepository_SearchByExternalID_AdminDecrypts(t *testing.T) {
 	if err := raw.Create(context.Background(), spectator); err != nil {
 		t.Fatalf("seed Create: %v", err)
 	}
+	deps := newTestBindingDeps(t)
+	bindTestSpectators(t, deps, []*domain.Spectator{spectator})
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger(), deps)
 	views, err := repo.SearchByExternalID(withAccess("admin", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -79,8 +81,10 @@ func TestSpectatorRepository_SearchByExternalID_AgentMasksPII(t *testing.T) {
 	if err := raw.Create(context.Background(), spectator); err != nil {
 		t.Fatalf("seed Create: %v", err)
 	}
+	deps := newTestBindingDeps(t)
+	bindTestSpectators(t, deps, []*domain.Spectator{spectator})
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger(), deps)
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -106,8 +110,10 @@ func TestSpectatorRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 	if err := raw.Create(context.Background(), spectator); err != nil {
 		t.Fatalf("seed Create: %v", err)
 	}
+	deps := newTestBindingDeps(t)
+	bindTestSpectators(t, deps, []*domain.Spectator{spectator})
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("off", 1), testLogger())
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("off", 1), testLogger(), deps)
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -121,7 +127,7 @@ func TestSpectatorRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 }
 
 func TestSpectatorRepository_MissingAccessContextDenied(t *testing.T) {
-	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), newSecuredPolicyEnforcer(t, "on"), config.NewDCSRuntime("on", 1), testLogger())
+	repo := NewSpectatorRepository(memory.NewSpectatorRepository(), newSecuredPolicyEnforcer(t, "on"), config.NewDCSRuntime("on", 1), testLogger(), newTestBindingDeps(t))
 
 	_, err := repo.SearchByExternalID(context.Background(), "t1", "TICKET-42")
 	if !errors.Is(err, service.ErrForbidden) {
@@ -137,7 +143,9 @@ func TestSpectatorRepository_AntiBypassDirectRepositoryCallStillEnforced(t *test
 		t.Fatalf("seed Create: %v", err)
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
+	deps := newTestBindingDeps(t)
+	bindTestSpectators(t, deps, []*domain.Spectator{spectator})
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger(), deps)
 	views, err := repo.SearchByExternalID(withAccess("agent", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)
@@ -160,7 +168,8 @@ func TestSpectatorRepository_SearchByExternalIDComputesLookupFromCleartext(t *te
 		},
 	}
 
-	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger())
+	deps := newTestBindingDeps(t)
+	repo := NewSpectatorRepository(raw, policyEnforcer, config.NewDCSRuntime("on", 1), testLogger(), deps)
 	_, err := repo.SearchByExternalID(withAccess("admin", service.ActionSearchSpectator), "t1", "TICKET-42")
 	if err != nil {
 		t.Fatalf("SearchByExternalID: %v", err)

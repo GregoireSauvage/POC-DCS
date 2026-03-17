@@ -11,10 +11,14 @@ import (
 )
 
 type SpectatorRepository struct {
-	raw      service.SpectatorRepository
-	enforcer service.PolicyEnforcer
-	runtime  service.RuntimeSettings
-	logger   *slog.Logger
+	raw             service.SpectatorRepository
+	enforcer        service.PolicyEnforcer
+	runtime         service.RuntimeSettings
+	logger          *slog.Logger
+	bindingStore    service.BindingStore
+	bindingVerifier service.BindingVerifier
+	bindingIssuer   service.BindingIssuer
+	labelIssuer     service.LabelIssuer
 }
 
 func NewSpectatorRepository(
@@ -22,12 +26,21 @@ func NewSpectatorRepository(
 	enforcer service.PolicyEnforcer,
 	runtime service.RuntimeSettings,
 	logger *slog.Logger,
+	deps ...BindingDependencies,
 ) *SpectatorRepository {
+	var bindingDeps BindingDependencies
+	if len(deps) > 0 {
+		bindingDeps = deps[0]
+	}
 	return &SpectatorRepository{
-		raw:      raw,
-		enforcer: enforcer,
-		runtime:  runtime,
-		logger:   logger,
+		raw:             raw,
+		enforcer:        enforcer,
+		runtime:         runtime,
+		logger:          logger,
+		bindingStore:    bindingDeps.Store,
+		bindingVerifier: bindingDeps.Verifier,
+		bindingIssuer:   bindingDeps.Issuer,
+		labelIssuer:     bindingDeps.LabelIssuer,
 	}
 }
 
@@ -36,11 +49,29 @@ func (r *SpectatorRepository) Create(ctx context.Context, spectator *domain.Spec
 	if err != nil {
 		return service.SpectatorReadView{}, err
 	}
+	if err := ensureBindingWriteDependencies(BindingDependencies{
+		Store: r.bindingStore, Verifier: r.bindingVerifier, Issuer: r.bindingIssuer, LabelIssuer: r.labelIssuer,
+	}); err != nil {
+		return service.SpectatorReadView{}, err
+	}
+
+	if txRepo, ok := r.raw.(spectatorTxRepository); ok {
+		if txStore, ok := r.bindingStore.(bindingTxStore); ok {
+			if err := r.createInTx(ctx, txRepo, txStore, access, spectator); err != nil {
+				return service.SpectatorReadView{}, err
+			}
+			return r.secureSpectator(ctx, access, spectator)
+		}
+	}
 
 	stop := perf.Span(ctx, "db_ms")
 	err = r.raw.Create(ctx, spectator)
 	stop()
 	if err != nil {
+		return service.SpectatorReadView{}, err
+	}
+
+	if err := r.writeBinding(ctx, access, spectator); err != nil {
 		return service.SpectatorReadView{}, err
 	}
 
@@ -52,13 +83,16 @@ func (r *SpectatorRepository) SearchByExternalID(ctx context.Context, tenantID s
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureBindingReadDependencies(BindingDependencies{Store: r.bindingStore, Verifier: r.bindingVerifier}); err != nil {
+		return nil, err
+	}
 
 	decision, err := r.enforcer.EvaluateSpectatorSearch(ctx, access.Principal, access.Request)
 	if err != nil {
 		return nil, err
 	}
 	if !decision.Allow {
-		return nil, &service.ForbiddenError{DecisionHash: decision.DecisionHash, Reason: decision.Reason}
+		return nil, &service.ForbiddenError{DecisionHash: decision.DecisionHash, Reason: decision.Reason, PolicyID: decision.PolicyID, PolicyVersion: decision.PolicyVersion}
 	}
 
 	pepper, err := r.enforcer.GetPepper(ctx, service.DefaultSpectatorPepperPath)
@@ -74,8 +108,16 @@ func (r *SpectatorRepository) SearchByExternalID(ctx context.Context, tenantID s
 		return nil, err
 	}
 
+	bindings, err := r.bindingStore.GetMany(ctx, tenantID, "spectator", bindSpectatorRecords(spectators))
+	if err != nil {
+		return nil, err
+	}
+
 	views := make([]service.SpectatorReadView, 0, len(spectators))
 	for _, spectator := range spectators {
+		if err := r.verifyBinding(ctx, spectator, bindings); err != nil {
+			return nil, err
+		}
 		view, err := r.secureSpectator(ctx, access, spectator)
 		if err != nil {
 			return nil, err
@@ -135,6 +177,70 @@ func (r *SpectatorRepository) accessContext(ctx context.Context) (service.Access
 		return service.AccessContext{}, &service.ForbiddenError{Reason: "missing_access_context"}
 	}
 	return access, nil
+}
+
+func (r *SpectatorRepository) verifyBinding(ctx context.Context, spectator *domain.Spectator, bindings map[string]service.ResourceBinding) error {
+	binding, ok := bindings[spectator.ID]
+	if !ok {
+		logBindingFailure(r.logger, "spectator", spectator.ID, "binding_missing", map[string]interface{}{})
+		return bindingFailureError("binding_missing", nil, map[string]interface{}{"resource_type": "spectator", "resource_id": spectator.ID})
+	}
+	if err := r.bindingVerifier.Verify(ctx, buildSpectatorPayload(spectator), binding.Label, binding.Binding); err != nil {
+		reason := bindingReasonFromError(err)
+		details := map[string]interface{}{"resource_type": "spectator", "resource_id": spectator.ID}
+		logBindingFailure(r.logger, "spectator", spectator.ID, reason, details)
+		return bindingFailureError(reason, &binding, details)
+	}
+	return nil
+}
+
+func (r *SpectatorRepository) writeBinding(ctx context.Context, access service.AccessContext, spectator *domain.Spectator) error {
+	label, err := r.labelIssuer.Issue(ctx, access, buildSpectatorResource(spectator))
+	if err != nil {
+		return err
+	}
+	bindingRecord, err := r.bindingIssuer.Create(ctx, buildSpectatorPayload(spectator), label)
+	if err != nil {
+		return err
+	}
+	return r.bindingStore.Upsert(ctx, service.ResourceBinding{
+		TenantID:     spectator.TenantID,
+		ResourceType: "spectator",
+		ResourceID:   spectator.ID,
+		Label:        label,
+		Binding:      bindingRecord,
+	})
+}
+
+func (r *SpectatorRepository) createInTx(ctx context.Context, txRepo spectatorTxRepository, txStore bindingTxStore, access service.AccessContext, spectator *domain.Spectator) error {
+	tx, err := txRepo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := txRepo.CreateInTx(ctx, tx, spectator); err != nil {
+		return err
+	}
+	label, err := r.labelIssuer.Issue(ctx, access, buildSpectatorResource(spectator))
+	if err != nil {
+		return err
+	}
+	bindingRecord, err := r.bindingIssuer.Create(ctx, buildSpectatorPayload(spectator), label)
+	if err != nil {
+		return err
+	}
+	if err := txStore.UpsertInTx(ctx, tx, service.ResourceBinding{
+		TenantID:     spectator.TenantID,
+		ResourceType: "spectator",
+		ResourceID:   spectator.ID,
+		Label:        label,
+		Binding:      bindingRecord,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *SpectatorRepository) logTechnicalRead(access service.AccessContext, spectator *domain.Spectator, view service.SpectatorReadView) {

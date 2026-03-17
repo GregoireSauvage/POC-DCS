@@ -19,10 +19,10 @@ type Config struct {
 	DatabaseURL string
 
 	// Vault
-	VaultAddr          string
-	VaultToken         string
-	VaultTransitKey    string
-	VaultKVPepperPath  string
+	VaultAddr         string
+	VaultToken        string
+	VaultTransitKey   string
+	VaultKVPepperPath string
 
 	// JWT
 	JWTSecret   string
@@ -31,9 +31,10 @@ type Config struct {
 	JWTTTLMin   int
 
 	// DCS
-	DCSMode       string
-	DCSConfigPath string
-	CacheLevel    int
+	DCSMode           string
+	DCSConfigPath     string
+	DCSBindingHMACKey string
+	CacheLevel        int
 
 	// Perf
 	PerfSource string
@@ -71,9 +72,10 @@ func Load() *Config {
 		JWTTTLMin:   parseInt(getenv("JWT_TTL_MINUTES", "240"), 240),
 
 		// DCS
-		DCSMode:       getenv("DCS_MODE", "on"),
-		DCSConfigPath: getenv("DCS_CONFIG_PATH", ""),
-		CacheLevel:    parseInt(getenv("CACHE_LEVEL", "1"), 1),
+		DCSMode:           getenv("DCS_MODE", "on"),
+		DCSConfigPath:     getenv("DCS_CONFIG_PATH", ""),
+		DCSBindingHMACKey: getenv("DCS_BINDING_HMAC_KEY", ""),
+		CacheLevel:        parseInt(getenv("CACHE_LEVEL", "1"), 1),
 
 		// Perf
 		PerfSource: getenv("PERF_SOURCE", "go"),

@@ -9,17 +9,18 @@ import (
 )
 
 type DCSConfig struct {
-	Policy PolicyConfig `json:"policy"`
-	PIP    PIPConfig    `json:"pip"`
-	PDP    PDPConfig    `json:"pdp"`
+	Policy  PolicyConfig  `json:"policy"`
+	Binding BindingConfig `json:"binding"`
+	PIP     PIPConfig     `json:"pip"`
+	PDP     PDPConfig     `json:"pdp"`
 }
 
 type PolicyConfig struct {
-	PolicyID            string                     `json:"policy_id"`
-	PolicyVersion       string                     `json:"policy_version"`
-	ClassificationOrder []service.Classification   `json:"classification_order"`
-	AllowedCategories   []string                   `json:"allowed_categories"`
-	Markings            map[string]string          `json:"markings"`
+	PolicyID            string                   `json:"policy_id"`
+	PolicyVersion       string                   `json:"policy_version"`
+	ClassificationOrder []service.Classification `json:"classification_order"`
+	AllowedCategories   []string                 `json:"allowed_categories"`
+	Markings            map[string]string        `json:"markings"`
 }
 
 type PIPConfig struct {
@@ -29,14 +30,20 @@ type PIPConfig struct {
 	ClientIPHeader string  `json:"client_ip_header"`
 }
 
+type BindingConfig struct {
+	ProfileID      string `json:"profile_id"`
+	ProofAlgorithm string `json:"proof_algorithm"`
+	KeyID          string `json:"key_id"`
+}
+
 type PDPConfig struct {
-	DefaultClassification         service.Classification      `json:"default_classification"`
-	ReadActions                   []string                    `json:"read_actions"`
-	WriteActions                  []string                    `json:"write_actions"`
-	BootstrapActions              []string                    `json:"bootstrap_actions"`
-	AuditActions                  []string                    `json:"audit_actions"`
+	DefaultClassification         service.Classification       `json:"default_classification"`
+	ReadActions                   []string                     `json:"read_actions"`
+	WriteActions                  []string                     `json:"write_actions"`
+	BootstrapActions              []string                     `json:"bootstrap_actions"`
+	AuditActions                  []string                     `json:"audit_actions"`
 	RoleClassificationActions     map[string]map[string]string `json:"role_classification_actions"`
-	SpectatorAgentHardeningFields []string                    `json:"spectator_agent_hardening_fields"`
+	SpectatorAgentHardeningFields []string                     `json:"spectator_agent_hardening_fields"`
 }
 
 func LoadDCSConfig(path string) (*DCSConfig, error) {
@@ -66,6 +73,11 @@ func DefaultDCSConfig() *DCSConfig {
 			ClassificationOrder: []service.Classification{service.ClassificationPublic, service.ClassificationInternal, service.ClassificationSensitive, service.ClassificationPII},
 			AllowedCategories:   []string{},
 			Markings:            map[string]string{},
+		},
+		Binding: BindingConfig{
+			ProfileID:      "internal/bdo-hmac-v1",
+			ProofAlgorithm: "hmac-sha256",
+			KeyID:          "binding-key-v1",
 		},
 		PIP: PIPConfig{
 			Channel:        "web",
@@ -121,6 +133,15 @@ func applyDCSDefaults(cfg *DCSConfig) {
 	}
 	if cfg.Policy.Markings == nil {
 		cfg.Policy.Markings = map[string]string{}
+	}
+	if cfg.Binding.ProfileID == "" {
+		cfg.Binding.ProfileID = defaults.Binding.ProfileID
+	}
+	if cfg.Binding.ProofAlgorithm == "" {
+		cfg.Binding.ProofAlgorithm = defaults.Binding.ProofAlgorithm
+	}
+	if cfg.Binding.KeyID == "" {
+		cfg.Binding.KeyID = defaults.Binding.KeyID
 	}
 	if cfg.PIP.Channel == "" {
 		cfg.PIP.Channel = defaults.PIP.Channel

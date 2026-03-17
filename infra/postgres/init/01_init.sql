@@ -59,6 +59,25 @@ CREATE TABLE IF NOT EXISTS spectators (
 CREATE INDEX IF NOT EXISTS idx_spectators_hall ON spectators(tenant_id, hall_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_spectators_lookup ON spectators(tenant_id, external_id_lookup);
 
+-- ---------- RESOURCE BINDINGS ----------
+CREATE TABLE IF NOT EXISTS resource_bindings (
+  tenant_id        TEXT NOT NULL,
+  resource_type    TEXT NOT NULL CHECK (resource_type IN ('film','hall','spectator')),
+  resource_id      UUID NOT NULL,
+  label_payload    JSONB NOT NULL,
+  profile_id       TEXT NOT NULL,
+  key_id           TEXT NOT NULL,
+  payload_hash     TEXT NOT NULL,
+  label_hash       TEXT NOT NULL,
+  proof            TEXT NOT NULL,
+  proof_algorithm  TEXT NOT NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, resource_type, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_bindings_resource ON resource_bindings(tenant_id, resource_type);
+
 -- ---------- FIELD CLASSIFICATION ----------
 CREATE TABLE IF NOT EXISTS field_classification (
   resource_type   TEXT NOT NULL,

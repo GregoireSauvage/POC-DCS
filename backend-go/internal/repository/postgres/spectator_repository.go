@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgtype"
+	"github.com/jackc/pgx/v4"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
 )
@@ -20,8 +22,18 @@ func NewSpectatorRepository(pool *Pool) *SpectatorRepository {
 	return &SpectatorRepository{pool: pool}
 }
 
+func (r *SpectatorRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.Begin(ctx)
+}
+
 // Create inserts a new spectator.
 func (r *SpectatorRepository) Create(ctx context.Context, spectator *domain.Spectator) error {
+	return r.CreateInTx(ctx, r.pool, spectator)
+}
+
+func (r *SpectatorRepository) CreateInTx(ctx context.Context, exec interface {
+	Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error)
+}, spectator *domain.Spectator) error {
 	if spectator.CreatedAt.IsZero() {
 		spectator.CreatedAt = time.Now().UTC()
 	}
@@ -47,7 +59,7 @@ func (r *SpectatorRepository) Create(ctx context.Context, spectator *domain.Spec
 		)
 	`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := exec.Exec(ctx, query,
 		spectator.TenantID,
 		spID,
 		hallID,

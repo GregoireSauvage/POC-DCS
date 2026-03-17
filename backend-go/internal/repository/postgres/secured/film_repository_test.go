@@ -32,7 +32,9 @@ func TestFilmRepository_ListByTenant_AdminDecrypts(t *testing.T) {
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx := withAccess("admin", service.ActionFilmRead)
 	views, err := repo.ListByTenant(ctx, "t1")
@@ -60,7 +62,9 @@ func TestFilmRepository_ListByTenant_DeveloperMasks(t *testing.T) {
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx := withAccess("developer", service.ActionFilmRead)
 	views, err := repo.ListByTenant(ctx, "t1")
@@ -86,7 +90,7 @@ func TestFilmRepository_CreateReturnsSecureView(t *testing.T) {
 	}
 
 	raw := memory.NewFilmRepository(nil)
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), newTestBindingDeps(t))
 
 	ctx := withAccess("developer", service.ActionFilmCreate)
 	view, err := repo.Create(ctx, "t1", "Memento", ciphertext)
@@ -115,7 +119,9 @@ func TestFilmRepository_UpdateTimeCiphertextReturnsSecureView(t *testing.T) {
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: initialCT},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: initialCT}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx := withAccess("admin", service.ActionFilmUpdateTime)
 	view, err := repo.UpdateTimeCiphertext(ctx, "t1", "film-1", updatedCT)
@@ -140,7 +146,9 @@ func TestFilmRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx := withAccess("developer", service.ActionFilmRead)
 	views, err := repo.ListByTenant(ctx, "t1")
@@ -165,7 +173,9 @@ func TestFilmRepository_MissingAccessContextDenied(t *testing.T) {
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	_, err = repo.ListByTenant(context.Background(), "t1")
 	if !errors.Is(err, service.ErrForbidden) {
@@ -183,7 +193,9 @@ func TestFilmRepository_AntiBypassDirectRepositoryCallStillEnforced(t *testing.T
 	raw := memory.NewFilmRepository([]service.FilmRecord{
 		{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext},
 	})
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: ciphertext}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx := withAccess("developer", service.ActionFilmRead)
 	views, err := repo.ListByTenant(ctx, "t1")
@@ -218,7 +230,9 @@ func TestFilmRepository_DBMSSpansOnlyRawRepository(t *testing.T) {
 			}, nil
 		},
 	}
-	repo := NewFilmRepository(raw, policyEnforcer, testLogger())
+	bindingDeps := newTestBindingDeps(t)
+	bindTestFilmRecords(t, bindingDeps, []service.FilmRecord{{TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: "ct"}})
+	repo := NewFilmRepository(raw, policyEnforcer, testLogger(), bindingDeps)
 
 	ctx, pctx := perf.NewContext(withAccess("admin", service.ActionFilmRead))
 	_, err := repo.ListByTenant(ctx, "t1")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v4"
 
@@ -20,6 +21,10 @@ type HallRepository struct {
 // NewHallRepository creates a new PostgreSQL hall repository.
 func NewHallRepository(pool *Pool) *HallRepository {
 	return &HallRepository{pool: pool}
+}
+
+func (r *HallRepository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.Begin(ctx)
 }
 
 // ListByTenant returns all halls for a tenant.
@@ -72,6 +77,12 @@ func (r *HallRepository) ListByTenant(ctx context.Context, tenantID string) ([]s
 
 // Create inserts a new hall.
 func (r *HallRepository) Create(ctx context.Context, hall *domain.Hall) error {
+	return r.CreateInTx(ctx, r.pool, hall)
+}
+
+func (r *HallRepository) CreateInTx(ctx context.Context, exec interface {
+	Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error)
+}, hall *domain.Hall) error {
 	if hall.CreatedAt.IsZero() {
 		hall.CreatedAt = time.Now().UTC()
 	}
@@ -94,7 +105,7 @@ func (r *HallRepository) Create(ctx context.Context, hall *domain.Hall) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := exec.Exec(ctx, query,
 		hall.TenantID,
 		hallID,
 		hall.Name,

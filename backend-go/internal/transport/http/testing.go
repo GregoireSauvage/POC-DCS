@@ -15,6 +15,7 @@ import (
 	legacyruntime "github.com/neoweyss/poc-dcs/backend-go/internal/dcs/runtime"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/dcs/types"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
+	infrabinding "github.com/neoweyss/poc-dcs/backend-go/internal/infra/binding"
 	infracache "github.com/neoweyss/poc-dcs/backend-go/internal/infra/cache"
 	infrakms "github.com/neoweyss/poc-dcs/backend-go/internal/infra/kms"
 	"github.com/neoweyss/poc-dcs/backend-go/internal/repository/memory"
@@ -56,6 +57,12 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 
 	// Setup DCS components
 	dcsConfig := config.DefaultDCSConfig() // Use defaults for tests
+	bindingManager := infrabinding.NewManager(infrabinding.Config{
+		ProfileID:      dcsConfig.Binding.ProfileID,
+		ProofAlgorithm: dcsConfig.Binding.ProofAlgorithm,
+		KeyID:          dcsConfig.Binding.KeyID,
+		Secret:         []byte(cfg.DCSBindingHMACKey),
+	})
 	classificationStore := &pip.StaticClassificationStore{
 		ByResource: map[string]map[string]types.Classification{
 			"film": {
@@ -108,14 +115,51 @@ func NewTestDependenciesBuilder(t *testing.T) *TestDependenciesBuilder {
 		{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
 	})
 	spectatorRepo := memory.NewSpectatorRepository()
+	bindingStore := memory.NewBindingRepository()
+	labelIssuer := service.NewServerLabelIssuer(
+		config.NewClassificationPolicy(dcsConfig),
+		service.NewStaticClassificationReader(map[string][]domain.FieldClassification{
+			"film": {
+				{ResourceType: "film", FieldName: "title", Classification: "PUBLIC"},
+				{ResourceType: "film", FieldName: "time_elapsed", Classification: "SENSITIVE"},
+			},
+			"hall": {
+				{ResourceType: "hall", FieldName: "name", Classification: "PUBLIC"},
+				{ResourceType: "hall", FieldName: "owner_user_id", Classification: "INTERNAL"},
+				{ResourceType: "hall", FieldName: "current_film_id", Classification: "INTERNAL"},
+			},
+			"spectator": {
+				{ResourceType: "spectator", FieldName: "name", Classification: "PII"},
+				{ResourceType: "spectator", FieldName: "age", Classification: "SENSITIVE"},
+				{ResourceType: "spectator", FieldName: "external_id", Classification: "PII"},
+			},
+		}),
+		map[string]service.Classification{
+			"film":      service.ClassificationSensitive,
+			"hall":      service.ClassificationInternal,
+			"spectator": service.ClassificationPII,
+		},
+	)
+	bindingDeps := securedrepo.BindingDependencies{
+		Store:       bindingStore,
+		Verifier:    bindingManager,
+		Issuer:      bindingManager,
+		LabelIssuer: labelIssuer,
+	}
+	seedAccess := service.AccessContext{
+		Principal: service.Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"},
+		Request:   service.RequestContext{RequestID: "seed", Channel: "seed", Purpose: "test", Env: "test"},
+	}
+	mustSeedBinding(t, bindingStore, bindingManager, labelIssuer, seedAccess, service.Resource{Type: "film", ID: "film-1", TenantID: "t1"}, filmBindingPayload{ResourceType: "film", TenantID: "t1", ID: "film-1", Title: "Interstellar", TimeElapsedCT: seedCT})
+	mustSeedBinding(t, bindingStore, bindingManager, labelIssuer, seedAccess, service.Resource{Type: "hall", ID: "hall-1", TenantID: "t1"}, hallBindingPayload{ResourceType: "hall", TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"})
 
 	// Setup services
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTLMin)
 
 	// No audit/perf services in tests by default (can be added via With methods)
-	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, dcsEnforcer, logger.With(slog.String("component", "secured_film_repository")))
-	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, dcsEnforcer, logger.With(slog.String("component", "secured_hall_repository")))
-	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, dcsEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")))
+	filmSecureRepo := securedrepo.NewFilmRepository(filmRepo, dcsEnforcer, logger.With(slog.String("component", "secured_film_repository")), bindingDeps)
+	hallSecureRepo := securedrepo.NewHallRepository(hallRepo, dcsEnforcer, logger.With(slog.String("component", "secured_hall_repository")), bindingDeps)
+	spectatorSecureRepo := securedrepo.NewSpectatorRepository(spectatorRepo, dcsEnforcer, rt, logger.With(slog.String("component", "secured_spectator_repository")), bindingDeps)
 	filmService := service.NewFilmService(filmSecureRepo, dcsEnforcer, nil, nil, rt)
 	hallService := service.NewHallServiceWithSecureRepo(hallRepo, hallSecureRepo, dcsEnforcer, nil, nil, rt)
 	spectatorService := service.NewSpectatorServiceWithSecureRepo(spectatorRepo, spectatorSecureRepo, hallRepo, dcsEnforcer, nil, nil, rt)
@@ -222,39 +266,102 @@ func newTestServerWithDeps(t *testing.T, customize func(*TestDependenciesBuilder
 // testConfig returns a config suitable for testing
 func testConfig() *config.Config {
 	return &config.Config{
-		Env:             "dev",
-		Service:         "backend-go-test",
-		HTTPAddr:        ":0",
-		GRPCAddr:        ":0",
-		LogLevel:        slog.LevelError,
-		DCSMode:         "on",
-		DCSConfigPath:   "",
-		CacheLevel:      1,
-		CacheMaxEntries: 100,
-		CacheTTLClassif: 60,
-		CacheTTLPDP:     60,
-		CacheTTLKMS:     60,
-		CacheTTLPepper:  60,
-		JWTSecret:       "test-secret",
-		JWTIssuer:       "test-issuer",
-		JWTAudience:     "test-audience",
-		JWTTTLMin:       60,
-		PerfSource:      "go",
+		Env:               "dev",
+		Service:           "backend-go-test",
+		HTTPAddr:          ":0",
+		GRPCAddr:          ":0",
+		LogLevel:          slog.LevelError,
+		PerfSource:        "go",
+		DCSMode:           "on",
+		DCSConfigPath:     "",
+		DCSBindingHMACKey: "test-binding-secret",
+		CacheLevel:        1,
+		CacheMaxEntries:   100,
+		CacheTTLClassif:   60,
+		CacheTTLPDP:       60,
+		CacheTTLKMS:       60,
+		CacheTTLPepper:    60,
+		JWTSecret:         "test-secret",
+		JWTIssuer:         "test-issuer",
+		JWTAudience:       "test-audience",
+		JWTTTLMin:         60,
 	}
 }
 
-// adminAuthHeader generates a JWT token for an admin user
-func adminAuthHeader(t *testing.T, s *Server) string {
+func mustSeedBinding(
+	t *testing.T,
+	store service.BindingStore,
+	issuer service.BindingIssuer,
+	labelIssuer service.LabelIssuer,
+	access service.AccessContext,
+	resource service.Resource,
+	payload any,
+) {
 	t.Helper()
-	token, err := s.jwtService.GenerateToken(
-		auth.JWTSubject{
-			UserID:   "admin-id",
-			TenantID: "t1",
-			Username: "admin",
-			Role:     "admin",
-		})
+	label, err := labelIssuer.Issue(context.Background(), access, resource)
 	if err != nil {
-		t.Fatalf("failed to generate admin token: %v", err)
+		t.Fatalf("issue label: %v", err)
 	}
+	binding, err := issuer.Create(context.Background(), payload, label)
+	if err != nil {
+		t.Fatalf("create binding: %v", err)
+	}
+	if err := store.Upsert(context.Background(), service.ResourceBinding{
+		TenantID:     resource.TenantID,
+		ResourceType: resource.Type,
+		ResourceID:   resource.ID,
+		Label:        label,
+		Binding:      binding,
+	}); err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+}
+
+type filmBindingPayload struct {
+	ResourceType  string `json:"resource_type"`
+	TenantID      string `json:"tenant_id"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	TimeElapsedCT string `json:"time_elapsed_ct"`
+}
+
+type hallBindingPayload struct {
+	ResourceType  string `json:"resource_type"`
+	TenantID      string `json:"tenant_id"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	OwnerUserID   string `json:"owner_user_id"`
+	CurrentFilmID string `json:"current_film_id"`
+}
+
+func authHeaderForRole(t *testing.T, server *Server, userID, username, role string) string {
+	t.Helper()
+
+	token, err := server.jwtService.GenerateToken(auth.JWTSubject{
+		UserID:   userID,
+		TenantID: "t1",
+		Username: username,
+		Role:     role,
+		Scopes:   []string{"cinema"},
+	})
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
 	return "Bearer " + token
+}
+
+func adminAuthHeader(t *testing.T, server *Server) string {
+	t.Helper()
+	return authHeaderForRole(t, server, "u-admin", "admin", "admin")
+}
+
+func agentAuthHeader(t *testing.T, server *Server) string {
+	t.Helper()
+	return authHeaderForRole(t, server, "u-agent", "agent", "agent")
+}
+
+func developerAuthHeader(t *testing.T, server *Server) string {
+	t.Helper()
+	return authHeaderForRole(t, server, "u-developer", "developer", "developer")
 }

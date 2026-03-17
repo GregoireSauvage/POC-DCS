@@ -19,10 +19,10 @@ var (
 
 // ForbiddenError wraps a forbidden error with additional context for audit logging
 type ForbiddenError struct {
-	DecisionHash string
-	Reason       string
-	Details      map[string]interface{}
-	PolicyID     string
+	DecisionHash  string
+	Reason        string
+	Details       map[string]interface{}
+	PolicyID      string
 	PolicyVersion string
 }
 
@@ -134,6 +134,26 @@ func (s *FilmService) Create(
 	// Phase 2: Persist + secure read-shaped response
 	created, err := s.repo.Create(ctx, principal.TenantID, encrypted.Title, encrypted.TimeElapsedCT)
 	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "film.create", "film", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "film.create", "film")
+			}
+			return FilmOutput{}, pctx, ErrForbidden
+		}
 		return FilmOutput{}, pctx, fmt.Errorf("create film: %w", err)
 	}
 
@@ -162,6 +182,26 @@ func (s *FilmService) List(ctx context.Context, principal Principal, reqCtx Requ
 
 	films, err := s.repo.ListByTenant(ctx, principal.TenantID)
 	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "film.read", "film", "", "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
+			if s.perf != nil {
+				s.writePerfLog(ctx, pctx, principal, reqCtx, "film.read", "film")
+			}
+			return nil, pctx, ErrForbidden
+		}
 		return nil, pctx, err
 	}
 
@@ -241,6 +281,20 @@ func (s *FilmService) UpdateTime(
 	updated, err := s.repo.UpdateTimeCiphertext(ctx, principal.TenantID, filmID, ciphertext)
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {
+			if s.audit != nil {
+				var forbiddenErr *ForbiddenError
+				decisionHash := ""
+				policyID := ""
+				policyVersion := ""
+				details := map[string]interface{}(nil)
+				if errors.As(err, &forbiddenErr) {
+					decisionHash = forbiddenErr.DecisionHash
+					policyID = forbiddenErr.PolicyID
+					policyVersion = forbiddenErr.PolicyVersion
+					details = forbiddenErr.Details
+				}
+				s.writeAuditLog(ctx, principal, reqCtx, "film.update_time", "film", filmID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+			}
 			return FilmOutput{}, pctx, err
 		}
 		if errors.Is(err, ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "not found") {

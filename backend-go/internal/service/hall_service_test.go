@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/neoweyss/poc-dcs/backend-go/internal/domain"
@@ -303,6 +304,136 @@ func TestHallService_Create_ReadEnforcementError(t *testing.T) {
 	}
 }
 
+func TestHallService_Create_SecureRepoWritesAudit_Allow(t *testing.T) {
+	rawRepo := &fakeHallRepo{}
+	secureRepo := &fakeSecureHallRepo{
+		createView: HallReadView{
+			Output: HallOutput{
+				ID:            "hall-1",
+				Name:          stringPtr("Hall A"),
+				OwnerUserID:   "u-ag…",
+				CurrentFilmID: "film…",
+			},
+			FieldsMasked:  []string{"owner_user_id", "current_film_id"},
+			DecisionHash:  "hash-hall-create",
+			PolicyID:      "cinema-default",
+			PolicyVersion: "v1",
+		},
+	}
+	enforcer := &fakeHallEnforcer{
+		createDecision: AuthorizationDecision{Allow: true, Reason: "write_allowed"},
+	}
+	mockWriter := &mockAuditService{}
+	svc := NewHallServiceWithSecureRepo(
+		rawRepo,
+		secureRepo,
+		enforcer,
+		NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
+		nil,
+		nil,
+	)
+
+	principal := Principal{TenantID: "t1", UserID: "u-agent", Role: "agent"}
+	reqCtx := RequestContext{RequestID: "req-hall-create-allow"}
+	input := HallCreateInput{Name: "Hall A", OwnerUserID: "u-agent", CurrentFilmID: "film-1"}
+
+	_, _, err := svc.Create(context.Background(), principal, reqCtx, input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if mockWriter.writeCalls != 1 {
+		t.Fatalf("expected 1 audit write, got %d", mockWriter.writeCalls)
+	}
+	if mockWriter.lastAuditLog.Action != "hall.create" {
+		t.Fatalf("expected hall.create audit, got %q", mockWriter.lastAuditLog.Action)
+	}
+	if mockWriter.lastAuditLog.Outcome != "allow" {
+		t.Fatalf("expected allow outcome, got %q", mockWriter.lastAuditLog.Outcome)
+	}
+	if mockWriter.lastAuditLog.PolicyID != "cinema-default" || mockWriter.lastAuditLog.PolicyVersion != "v1" {
+		t.Fatalf("expected policy metadata in audit, got %q/%q", mockWriter.lastAuditLog.PolicyID, mockWriter.lastAuditLog.PolicyVersion)
+	}
+	if mockWriter.lastAuditLog.ResourceID == "" {
+		t.Fatalf("expected resource id to be populated")
+	}
+}
+
+func TestHallService_Create_WritesAudit_Deny(t *testing.T) {
+	repo := &fakeHallRepo{}
+	enforcer := &fakeHallEnforcer{
+		createDecision: AuthorizationDecision{
+			Allow:         false,
+			Reason:        "write_forbidden",
+			DecisionHash:  "hash-deny",
+			PolicyID:      "cinema-default",
+			PolicyVersion: "v1",
+		},
+	}
+	mockWriter := &mockAuditService{}
+	svc := &hallService{
+		repo:     repo,
+		enforcer: enforcer,
+		audit:    NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
+	}
+
+	_, _, err := svc.Create(context.Background(), Principal{TenantID: "t1", UserID: "u-dev", Role: "developer"}, RequestContext{RequestID: "req-hall-deny"}, HallCreateInput{
+		Name: "Hall C", OwnerUserID: "u-dev", CurrentFilmID: "film-3",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+	if mockWriter.writeCalls != 1 {
+		t.Fatalf("expected 1 audit write, got %d", mockWriter.writeCalls)
+	}
+	if mockWriter.lastAuditLog.Action != "hall.create" || mockWriter.lastAuditLog.Outcome != "deny" {
+		t.Fatalf("expected deny hall.create audit, got action=%q outcome=%q", mockWriter.lastAuditLog.Action, mockWriter.lastAuditLog.Outcome)
+	}
+	if mockWriter.lastAuditLog.DecisionHash != "hash-deny" {
+		t.Fatalf("expected decision hash to be propagated, got %q", mockWriter.lastAuditLog.DecisionHash)
+	}
+}
+
+func TestHallService_List_SecureRepoWritesAudit_Allow(t *testing.T) {
+	rawRepo := &fakeHallRepo{}
+	secureRepo := &fakeSecureHallRepo{
+		listViews: []HallReadView{
+			{
+				Output: HallOutput{
+					ID:            "hall-1",
+					Name:          stringPtr("Hall A"),
+					OwnerUserID:   "u-ow…",
+					CurrentFilmID: "film…",
+				},
+				FieldsMasked:  []string{"owner_user_id", "current_film_id"},
+				DecisionHash:  "hash-hall-read",
+				PolicyID:      "cinema-default",
+				PolicyVersion: "v1",
+			},
+		},
+	}
+	mockWriter := &mockAuditService{}
+	svc := &hallService{
+		repo:       rawRepo,
+		secureRepo: secureRepo,
+		enforcer:   &fakeHallEnforcer{},
+		audit:      NewAuditService(&mockAuditRepositoryAdapter{mock: mockWriter}, nil, slog.Default()),
+	}
+
+	_, _, err := svc.List(context.Background(), Principal{TenantID: "t1", UserID: "u-admin", Role: "admin"}, RequestContext{RequestID: "req-hall-read"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if mockWriter.writeCalls != 1 {
+		t.Fatalf("expected 1 audit write, got %d", mockWriter.writeCalls)
+	}
+	if mockWriter.lastAuditLog.Action != "hall.read" || mockWriter.lastAuditLog.Outcome != "allow" {
+		t.Fatalf("expected allow hall.read audit, got action=%q outcome=%q", mockWriter.lastAuditLog.Action, mockWriter.lastAuditLog.Outcome)
+	}
+	if !contains(mockWriter.lastAuditLog.FieldsMasked, "owner_user_id") {
+		t.Fatalf("expected masked fields in audit, got %v", mockWriter.lastAuditLog.FieldsMasked)
+	}
+}
+
 // ==================== MOCKS ====================
 
 type fakeHallRepo struct {
@@ -359,6 +490,42 @@ func (f *fakeHallRepo) FindByID(_ context.Context, tenantID string, hallID strin
 		}
 	}
 	return nil, nil
+}
+
+type fakeSecureHallRepo struct {
+	listViews  []HallReadView
+	listErr    error
+	createView HallReadView
+	createErr  error
+}
+
+func (f *fakeSecureHallRepo) ListByTenant(_ context.Context, _ string) ([]HallReadView, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listViews, nil
+}
+
+func (f *fakeSecureHallRepo) Create(_ context.Context, _ *domain.Hall) (HallReadView, error) {
+	if f.createErr != nil {
+		return HallReadView{}, f.createErr
+	}
+	return f.createView, nil
+}
+
+type mockAuditRepositoryAdapter struct {
+	mock *mockAuditService
+}
+
+func (m *mockAuditRepositoryAdapter) Create(ctx context.Context, log *domain.AuditLog) error {
+	if m == nil || m.mock == nil {
+		return nil
+	}
+	return m.mock.WriteAudit(ctx, log)
+}
+
+func (m *mockAuditRepositoryAdapter) List(_ context.Context, _ string, _ int) ([]*domain.AuditLog, error) {
+	return nil, errors.New("not implemented")
 }
 
 type fakeHallEnforcer struct {

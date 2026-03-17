@@ -20,13 +20,10 @@ import (
 )
 
 func TestHallRepository_ListByTenant_AdminSeesInternalFields(t *testing.T) {
-	repo := NewHallRepository(
-		memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		}),
-		newSecuredPolicyEnforcer(t, "on"),
-		testLogger(),
-	)
+	seed := []domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}}
+	deps := newTestBindingDeps(t)
+	bindTestHalls(t, deps, seed)
+	repo := NewHallRepository(memory.NewHallRepository(seed), newSecuredPolicyEnforcer(t, "on"), testLogger(), deps)
 
 	views, err := repo.ListByTenant(withAccess("admin", service.ActionHallRead), "t1")
 	if err != nil {
@@ -44,13 +41,10 @@ func TestHallRepository_ListByTenant_AdminSeesInternalFields(t *testing.T) {
 }
 
 func TestHallRepository_ListByTenant_DeveloperMasksInternalFields(t *testing.T) {
-	repo := NewHallRepository(
-		memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		}),
-		newSecuredPolicyEnforcer(t, "on"),
-		testLogger(),
-	)
+	seed := []domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}}
+	deps := newTestBindingDeps(t)
+	bindTestHalls(t, deps, seed)
+	repo := NewHallRepository(memory.NewHallRepository(seed), newSecuredPolicyEnforcer(t, "on"), testLogger(), deps)
 
 	views, err := repo.ListByTenant(withAccess("developer", service.ActionHallRead), "t1")
 	if err != nil {
@@ -71,7 +65,7 @@ func TestHallRepository_ListByTenant_DeveloperMasksInternalFields(t *testing.T) 
 }
 
 func TestHallRepository_CreateReturnsSecureView(t *testing.T) {
-	repo := NewHallRepository(memory.NewHallRepository(nil), newSecuredPolicyEnforcer(t, "on"), testLogger())
+	repo := NewHallRepository(memory.NewHallRepository(nil), newSecuredPolicyEnforcer(t, "on"), testLogger(), newTestBindingDeps(t))
 
 	view, err := repo.Create(withAccess("developer", service.ActionHallCreate), &domain.Hall{
 		TenantID:      "t1",
@@ -92,13 +86,10 @@ func TestHallRepository_CreateReturnsSecureView(t *testing.T) {
 }
 
 func TestHallRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
-	repo := NewHallRepository(
-		memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		}),
-		newSecuredPolicyEnforcer(t, "off"),
-		testLogger(),
-	)
+	seed := []domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}}
+	deps := newTestBindingDeps(t)
+	bindTestHalls(t, deps, seed)
+	repo := NewHallRepository(memory.NewHallRepository(seed), newSecuredPolicyEnforcer(t, "off"), testLogger(), deps)
 
 	views, err := repo.ListByTenant(withAccess("developer", service.ActionHallRead), "t1")
 	if err != nil {
@@ -113,13 +104,10 @@ func TestHallRepository_DCSOffPreservesLegacyBehavior(t *testing.T) {
 }
 
 func TestHallRepository_MissingAccessContextDenied(t *testing.T) {
-	repo := NewHallRepository(
-		memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		}),
-		newSecuredPolicyEnforcer(t, "on"),
-		testLogger(),
-	)
+	seed := []domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}}
+	deps := newTestBindingDeps(t)
+	bindTestHalls(t, deps, seed)
+	repo := NewHallRepository(memory.NewHallRepository(seed), newSecuredPolicyEnforcer(t, "on"), testLogger(), deps)
 
 	_, err := repo.ListByTenant(context.Background(), "t1")
 	if !errors.Is(err, service.ErrForbidden) {
@@ -128,13 +116,10 @@ func TestHallRepository_MissingAccessContextDenied(t *testing.T) {
 }
 
 func TestHallRepository_AntiBypassDirectRepositoryCallStillEnforced(t *testing.T) {
-	repo := NewHallRepository(
-		memory.NewHallRepository([]domain.Hall{
-			{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"},
-		}),
-		newSecuredPolicyEnforcer(t, "on"),
-		testLogger(),
-	)
+	seed := []domain.Hall{{TenantID: "t1", ID: "hall-1", Name: "Hall A", OwnerUserID: "u-admin", CurrentFilmID: "film-1"}}
+	deps := newTestBindingDeps(t)
+	bindTestHalls(t, deps, seed)
+	repo := NewHallRepository(memory.NewHallRepository(seed), newSecuredPolicyEnforcer(t, "on"), testLogger(), deps)
 
 	views, err := repo.ListByTenant(withAccess("developer", service.ActionHallRead), "t1")
 	if err != nil {

@@ -127,6 +127,26 @@ func (s *SpectatorService) Create(
 	if s.secureRepo != nil {
 		view, err := s.secureRepo.Create(ctx, spectator)
 		if err != nil {
+			if errors.Is(err, ErrForbidden) {
+				if s.audit != nil {
+					var forbiddenErr *ForbiddenError
+					decisionHash := ""
+					policyID := ""
+					policyVersion := ""
+					details := map[string]interface{}(nil)
+					if errors.As(err, &forbiddenErr) {
+						decisionHash = forbiddenErr.DecisionHash
+						policyID = forbiddenErr.PolicyID
+						policyVersion = forbiddenErr.PolicyVersion
+						details = forbiddenErr.Details
+					}
+					s.writeAuditLog(ctx, principal, reqCtx, "spectator.create", "spectator", spectator.ID, "deny", decisionHash, policyID, policyVersion, details, nil, nil, nil)
+				}
+				if s.perf != nil {
+					s.writePerfLog(ctx, pctx, principal, reqCtx, "spectator.create", "spectator")
+				}
+				return SpectatorOutput{}, pctx, ErrForbidden
+			}
 			return SpectatorOutput{}, pctx, err
 		}
 
@@ -202,8 +222,19 @@ func (s *SpectatorService) Search(
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				if s.audit != nil {
+					var forbiddenErr *ForbiddenError
+					decisionHash := ""
+					policyID := ""
+					policyVersion := ""
+					details := map[string]interface{}(nil)
+					if errors.As(err, &forbiddenErr) {
+						decisionHash = forbiddenErr.DecisionHash
+						policyID = forbiddenErr.PolicyID
+						policyVersion = forbiddenErr.PolicyVersion
+						details = forbiddenErr.Details
+					}
 					s.writeAuditLog(ctx, principal, reqCtx, "search.spectator", "spectator", "", "deny",
-						"", "", "", nil, nil, nil, nil)
+						decisionHash, policyID, policyVersion, details, nil, nil, nil)
 				}
 				if s.perf != nil {
 					s.writePerfLog(ctx, pctx, principal, reqCtx, "search.spectator", "spectator")

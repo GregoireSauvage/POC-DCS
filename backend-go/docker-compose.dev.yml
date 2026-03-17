@@ -27,6 +27,7 @@ services:
       # DCS Config
       ENV: dev
       DCS_MODE: on
+      DCS_BINDING_HMAC_KEY: dev-binding-secret-change-me
       CACHE_LEVEL: 1
 
       # Cache TTLs
